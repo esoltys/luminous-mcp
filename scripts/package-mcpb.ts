@@ -112,6 +112,14 @@ try {
         name: "get_artist_summary",
         description: "Get artist summary including catalog size, albums, genres, collaborators, and listening stats",
       },
+      {
+        name: "get_listening_stats",
+        description: "Analyze listening habits, top tracks, top artists, forgotten favorites, and frequently skipped music",
+      },
+      {
+        name: "get_recent_history",
+        description: "Get chronological playback history from play_history table with timestamps and playback context",
+      },
     ],
     keywords: ["music", "audio", "luminous", "library", "player", "metadata"],
     compatibility: {
