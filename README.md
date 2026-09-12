@@ -2,7 +2,7 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Luminous Music Player](https://github.com/esoltys/luminous).
 
-Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Goose, Ollama) to your local music library.
+Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) to your local music library.
 
 ## ✨ Features
 
