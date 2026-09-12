@@ -1,8 +1,8 @@
 # Issue Priority & Status
 
 Priority (P1–P4) and Status (Todo/In Progress/Done/Parked) are tracked exclusively as fields on
-the "Luminous MCP" GitHub Project (\gh project\ number \5\, owner \soltys\) — never as
-labels. Both are readable and settable directly through the \gh project\ CLI; there's no need to
+the "Luminous MCP" GitHub Project (`gh project` number `5`, owner `esoltys`) — never as
+labels. Both are readable and settable directly through the `gh project` CLI; there's no need to
 ask the user to update them by hand or fall back to a label as a substitute.
 
 ## Adding a new issue to the board
@@ -10,48 +10,48 @@ ask the user to update them by hand or fall back to a label as a substitute.
 A freshly created issue isn't a Project item yet, so it has no Priority/Status to read or set
 until it's added:
 
-\\\ash
+```bash
 gh project item-add 5 --owner esoltys --url <issue-url>
-\\\
+```
 
 ## Reading current values
 
-\\\ash
+```bash
 gh project item-list 5 --owner esoltys --format json
-\\\
+```
 
-Each item in the result includes \priority\ and \status\ directly, plus \content.number\ so you
+Each item in the result includes `priority` and `status` directly, plus `content.number` so you
 can match it to a specific issue.
 
 ## Setting a value
 
-Find the item's \id\ from the \item-list\ output above (matching on \content.number\), then:
+Find the item's `id` from the `item-list` output above (matching on `content.number`), then:
 
-\\\ash
+```bash
 gh project item-edit --project-id PVT_kwHOAAE3ZM4BjPpD --id <item-id> \
   --field-id <field-id> --single-select-option-id <option-id>
-\\\
+```
 
-**Priority** — field id \PVTSSF_lAHOAAE3ZM4BjPpDzhiEupI\:
-
-| Option | id |
-| --- | --- |
-| P1 | \8b9338b1\ |
-| P2 | \567c1de3\ |
-| P3 | \996cb43\ |
-| P4 | \97524b7b\ |
-
-**Status** — field id \PVTSSF_lAHOAAE3ZM4BjPpDzhiEulw\:
+**Priority** — field id `PVTSSF_lAHOAAE3ZM4BjPpDzhiEupI`:
 
 | Option | id |
 | --- | --- |
-| Todo | \75ad846\ |
-| In Progress | \47fc9ee4\ |
-| Done | \98236657\ |
-| Parked | \9e808b96\ |
+| P1 | `8b9338b1` |
+| P2 | `567c1de3` |
+| P3 | `e996cb43` |
+| P4 | `97524b7b` |
 
-If the Project's fields are ever recreated, these IDs will change — re-run \gh project field-list
-5 --owner esoltys --format json\ and update this table.
+**Status** — field id `PVTSSF_lAHOAAE3ZM4BjPpDzhiEulw`:
+
+| Option | id |
+| --- | --- |
+| Todo | `f75ad846` |
+| In Progress | `47fc9ee4` |
+| Done | `98236657` |
+| Parked | `9e808b96` |
+
+If the Project's fields are ever recreated, these IDs will change — re-run `gh project field-list
+5 --owner esoltys --format json` and update this table.
 
 ## Priority scheme
 

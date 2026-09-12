@@ -2,7 +2,7 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Luminous Music Player](https://github.com/esoltys/luminous).
 
-Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Goose, Ollama) to your local music library.
+Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) to your local music library.
 
 ## ✨ Features
 
@@ -21,24 +21,24 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Goose, Ol
 
 ### Installation
 
-\\\ash
+```bash
 git clone https://github.com/esoltys/luminous-mcp.git
 cd luminous-mcp
 bun install
 bun run build
-\\\
+```
 
 ### Running the Server
 
-\\\ash
+```bash
 bun run start
-\\\
+```
 
 ### Adding to Claude Desktop / MCP Clients
 
-Add to your \claude_desktop_config.json\ or MCP client configuration:
+Add to your `claude_desktop_config.json` or MCP client configuration:
 
-\\\json
+```json
 {
   "mcpServers": {
     "luminous": {
@@ -50,13 +50,13 @@ Add to your \claude_desktop_config.json\ or MCP client configuration:
     }
   }
 }
-\\\
+```
 
 ## 🛠️ Development
 
-- **Typecheck**: \un run typecheck\
-- **Tests**: \un test\
-- **Build**: \un run build\
+- **Typecheck**: `bun run typecheck`
+- **Tests**: `bun test`
+- **Build**: `bun run build`
 
 ## 📄 License
 
