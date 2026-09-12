@@ -39,4 +39,20 @@ describe("MCPB Packaging Assets & Configuration", () => {
     const scriptPath = path.join(projectRoot, "scripts", "package-mcpb.ts");
     expect(fs.existsSync(scriptPath)).toBe(true);
   });
+
+  it("packages bundle and produces valid .mcpb and .dxt archives", () => {
+    const result = Bun.spawnSync(["bun", "run", "scripts/package-mcpb.ts"], {
+      cwd: projectRoot,
+      env: process.env,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const mcpbPath = path.join(projectRoot, "dist", "luminous-mcp.mcpb");
+    const dxtPath = path.join(projectRoot, "dist", "luminous-mcp.dxt");
+
+    expect(fs.existsSync(mcpbPath)).toBe(true);
+    expect(fs.existsSync(dxtPath)).toBe(true);
+    expect(fs.statSync(mcpbPath).size).toBeGreaterThan(1000);
+    expect(fs.statSync(dxtPath).size).toBeGreaterThan(1000);
+  }, 30000);
 });

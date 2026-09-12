@@ -49,3 +49,27 @@ jobs:
 
       - name: Run tests
         run: bun test
+
+  package:
+    name: Package & Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build JS bundle
+        run: bun run build
+
+      - name: Build & validate MCP Bundle (.mcpb)
+        run: bun run package:mcpb
+
+      - name: Verify MCPB bundle metadata
+        run: bun x @anthropic-ai/mcpb info dist/luminous-mcp.mcpb
