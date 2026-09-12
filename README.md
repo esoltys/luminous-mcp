@@ -34,19 +34,27 @@ bun run build
 bun run start
 ```
 
-### Adding to Claude Desktop / MCP Clients
+### One-Click Install (Claude Desktop)
 
-Add to your `claude_desktop_config.json` or MCP client configuration:
+Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelcontextprotocol/mcpb) format:
+
+1. Build the bundle:
+   ```bash
+   bun run package:mcpb
+   ```
+2. Open Claude Desktop, go to **Settings > Extensions**, and drag `dist/luminous-mcp.mcpb` into the window.
+3. Click **Install**. The extension runs a self-contained binary with zero external dependencies.
+
+### Manual Configuration (Claude Desktop, Antigravity, Cursor)
+
+Alternatively, add `luminous` to your `claude_desktop_config.json` or MCP client configuration:
 
 ```json
 {
   "mcpServers": {
     "luminous": {
       "command": "bun",
-      "args": ["run", "C:/Users/ericj/source/luminous-mcp/src/index.ts"],
-      "env": {
-        "LUMINOUS_DB_PATH": ""
-      }
+      "args": ["run", "C:/path/to/luminous-mcp/src/index.ts"]
     }
   }
 }

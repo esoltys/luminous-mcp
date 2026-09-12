@@ -9,6 +9,9 @@
   },
   "scripts": {
     "build": "bun build src/index.ts --target=node --outfile=dist/index.js",
+    "build:binary": "bun build src/index.ts --compile --outfile dist/luminous-mcp.exe",
+    "package:mcpb": "bun run scripts/package-mcpb.ts",
+    "package": "bun run package:mcpb",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "start": "bun run src/index.ts"
@@ -27,6 +30,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@types/bun": "latest",
     "typescript": "^5.7.3"
   }
