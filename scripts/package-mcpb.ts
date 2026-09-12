@@ -111,16 +111,28 @@ try {
   const manifestPath = path.join(stagingDir, "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
+  const localMcpbBin = path.join(
+    projectRoot,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "mcpb.cmd" : "mcpb"
+  );
+
+  const runMcpb = (args: string[]) => {
+    if (existsSync(localMcpbBin)) {
+      return spawnSync(localMcpbBin, args, {
+        cwd: projectRoot,
+        stdio: "inherit",
+      });
+    }
+    return spawnSync("bun", ["x", "@anthropic-ai/mcpb", ...args], {
+      cwd: projectRoot,
+      stdio: "inherit",
+    });
+  };
+
   console.log("4. Validating manifest with mcpb...");
-  const validateResult = spawnSync("bun", [
-    "x",
-    "mcpb",
-    "validate",
-    manifestPath,
-  ], {
-    cwd: projectRoot,
-    stdio: "inherit",
-  });
+  const validateResult = runMcpb(["validate", manifestPath]);
 
   if (validateResult.status !== 0) {
     throw new Error(`Manifest validation failed with status ${validateResult.status}`);
@@ -130,16 +142,7 @@ try {
   const outputDxt = path.join(distDir, "luminous-mcp.dxt");
 
   console.log(`5. Packing bundle to ${outputMcpb}...`);
-  const packResult = spawnSync("bun", [
-    "x",
-    "mcpb",
-    "pack",
-    stagingDir,
-    outputMcpb,
-  ], {
-    cwd: projectRoot,
-    stdio: "inherit",
-  });
+  const packResult = runMcpb(["pack", stagingDir, outputMcpb]);
 
   if (packResult.status !== 0) {
     throw new Error(`mcpb pack failed with status ${packResult.status}`);
