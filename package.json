@@ -1,0 +1,33 @@
+{
+  "name": "luminous-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol (MCP) server for Luminous Music Player",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "luminous-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "start": "bun run src/index.ts"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "luminous",
+    "music",
+    "audio"
+  ],
+  "author": "Eric James Soltys",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.3"
+  }
+}

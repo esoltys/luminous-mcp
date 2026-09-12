@@ -1,0 +1,60 @@
+name: 🐛 Bug Report
+description: Report something that isn't working as expected in luminous-mcp.
+title: 'Bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve luminous-mcp! Please search existing issues before opening a new one.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Pre-flight Checklist
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate.
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: Describe what went wrong...
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS & MCP Host
+      placeholder: e.g. Windows 11 / Claude Desktop / Antigravity / Bun 1.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How do we trigger this bug?
+      placeholder: |
+        1. Call tool '...'
+        2. With arguments '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      placeholder: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Error Output
+      description: Paste stderr logs or MCP JSON-RPC messages here.
