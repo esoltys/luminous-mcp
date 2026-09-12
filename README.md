@@ -14,6 +14,16 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
 - **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next, seek, volume).
 
+## 🛠️ Available MCP Tools
+
+- **`ping`**: Check server connectivity, uptime, and database health status.
+- **`get_server_info`**: Inspect server metadata, SQLite database path resolution, schema version, and library size.
+- **`search_library`**: Full-text search and structured filtering across tracks (artist, album, genre, composer, release year, BPM tempo, LUFS loudness).
+- **`get_track_details`**: Retrieve deep audio metadata, acoustic measurements, lyrics, MusicBrainz IDs, and playback stats for a track.
+- **`get_artist_summary`**: Aggregate artist catalog statistics, albums, genres, collaborators, and listening metrics.
+- **`get_listening_stats`**: Analyze listening habits, top tracks, top artists, frequently skipped tracks, and forgotten favorites (frequently played tracks unplayed for $N$ months).
+- **`get_recent_history`**: Chronological playback log from `play_history` with timestamps, durations, and playback context (album, song, or playlist).
+
 ## 🚀 Getting Started
 
 ### Prerequisites
