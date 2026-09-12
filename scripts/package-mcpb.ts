@@ -100,6 +100,18 @@ try {
         name: "get_server_info",
         description: "Get Luminous MCP server metadata, database resolution status, schema version, and library size",
       },
+      {
+        name: "search_library",
+        description: "Search music library tracks with full-text search and structured filters (genre, year, BPM, loudness)",
+      },
+      {
+        name: "get_track_details",
+        description: "Get comprehensive metadata, audio specs, acoustic measurements, lyrics, and IDs for a track",
+      },
+      {
+        name: "get_artist_summary",
+        description: "Get artist summary including catalog size, albums, genres, collaborators, and listening stats",
+      },
     ],
     keywords: ["music", "audio", "luminous", "library", "player", "metadata"],
     compatibility: {
