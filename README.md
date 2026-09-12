@@ -4,6 +4,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [L
 
 Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) to your local music library.
 
+![screenshot-01](./docs/screenshot-01.jpg)
+
 ## ✨ Features
 
 - **Library Search & Filtering**: Search tracks, albums, artists, genres, composers, and lyrics using SQLite FTS5. Filter by BPM, LUFS loudness, dynamic range, and bit depth.
