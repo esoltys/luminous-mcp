@@ -14,6 +14,43 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
 - **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next, seek, volume).
 
+## Example Prompts
+
+Here are prompt examples demonstrating natural language queries you can ask your AI assistant:
+
+### Music Discovery & Acoustic Filtering
+
+- "Look up the track details and audio specs for my song 'Heartbeat Highway' by Cannons."
+- "Find all songs by Def Leppard on my 'Hysteria' album, including their release years and play counts."
+- "Search my library for electronic or synthwave tracks released between 2020 and 2026."
+- "Find quiet ambient or folk songs with an integrated loudness lower than -14 LUFS (like my Danheim collection) for evening relaxation."
+
+### Listening Habits & Analytics Insights
+
+- "What are my top 5 most listened to artists in my library and what are my total play counts for each?"
+- "Surface some forgotten favorites: tracks I used to listen to frequently that haven't been played in the last few months."
+- "Which tracks in my library have the highest skip count or skip ratio?"
+- "Show me my recent listening history from today, including playback context and duration."
+
+### Artist Catalog & Collaborations
+
+- "Give me an artist summary for Cannons: how many tracks and albums do I own, who are their composers/producers, and what are my top played songs by them?"
+- "Summarize my Danheim catalog: total tracks, albums, and genre distribution."
+- "What albums do I have by Shania Twain, and which of her tracks have I played the most?"
+
+### Playlist Creation & Curation
+
+- "Inspect my 'Late Night Mix' or 'Road Trip' playlist and show me the tracks and running order."
+- "Create a new playlist called 'Indie & Synth Gems' and populate it with 10 tracks by Cannons and similar electronic/alternative artists in my library."
+- "Find my top 10 most played Country and Southern Rock tracks (like Ella Langley or Brothers Osborne) and add them to a new playlist named 'Country Favorites'."
+- "List all of my current playlists and how many tracks each one contains."
+
+### Metadata Hygiene & Library Auditing
+
+- "Audit my library for missing metadata: how many tracks are missing genres, release years, or album art?"
+- "Check which songs in my library are missing MusicBrainz recording or track IDs."
+- "Find tracks in my library with compound genre tags (like 'Metal; Progressive Metal' or 'Ambient; Ambient Folk') so I can review my taxonomy."
+
 ## Token Efficiency & Optimization
 
 Luminous MCP implements strict token-efficiency and context window optimization best practices designed specifically for LLMs:
