@@ -4,10 +4,12 @@ import { LuminousDatabase } from "./db/connection.ts";
 import { resolveDbPath } from "./db/paths.ts";
 import { registerAnalyticsTools } from "./tools/analytics.ts";
 import { registerLibraryTools } from "./tools/library.ts";
+import { registerPlaylistTools } from "./tools/playlists.ts";
 import { registerSystemTools } from "./tools/system.ts";
 
 export interface ServerOptions {
   dbPath?: string;
+  readonly?: boolean;
 }
 
 export interface ServerContext {
@@ -20,7 +22,7 @@ export interface ServerContext {
  */
 export function createMcpServer(options: ServerOptions = {}): ServerContext {
   const dbPath = resolveDbPath({ customPath: options.dbPath });
-  const db = new LuminousDatabase(dbPath);
+  const db = new LuminousDatabase(dbPath, { readonly: options.readonly });
 
   const server = new McpServer({
     name: SERVER_NAME,
@@ -30,6 +32,7 @@ export function createMcpServer(options: ServerOptions = {}): ServerContext {
   registerSystemTools(server, db);
   registerLibraryTools(server, db);
   registerAnalyticsTools(server, db);
+  registerPlaylistTools(server, db);
 
   return { server, db };
 }

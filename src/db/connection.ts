@@ -13,10 +13,17 @@ export interface DbStats {
   trackCount: number;
 }
 
+export interface DatabaseOptions {
+  readonly?: boolean;
+}
+
 export class LuminousDatabase {
   private db: Database | null = null;
+  public readonly isReadonly: boolean;
 
-  constructor(public readonly dbPath: string) {}
+  constructor(public readonly dbPath: string, options: DatabaseOptions = {}) {
+    this.isReadonly = options.readonly ?? false;
+  }
 
   /**
    * Checks whether the database file exists on disk.
@@ -34,7 +41,7 @@ export class LuminousDatabase {
 
   /**
    * Returns the underlying bun:sqlite Database instance.
-   * Lazily opens the database in read-only mode if not already connected.
+   * Lazily opens the database connection if not already connected.
    *
    * @throws Error if the database file does not exist on disk.
    */
@@ -50,8 +57,10 @@ export class LuminousDatabase {
       );
     }
 
-    const db = new Database(this.dbPath, { readonly: true });
-    // Optimize read concurrency with Luminous desktop app
+    const db = this.isReadonly
+      ? new Database(this.dbPath, { readonly: true })
+      : new Database(this.dbPath);
+    // Optimize concurrency with Luminous desktop app
     db.run("PRAGMA busy_timeout = 5000;");
     this.db = db;
     return this.db;

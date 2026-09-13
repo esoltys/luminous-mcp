@@ -54,7 +54,7 @@ describe("LuminousDatabase", () => {
     writer.run("INSERT INTO songs (title, artist) VALUES ('Track 3', 'Artist C');");
     writer.close();
 
-    const db = new LuminousDatabase(tempDbPath);
+    const db = new LuminousDatabase(tempDbPath, { readonly: true });
     expect(db.exists()).toBe(true);
     expect(db.isOpen()).toBe(false);
 
@@ -76,6 +76,25 @@ describe("LuminousDatabase", () => {
     expect(() => {
       handle.run("INSERT INTO songs (title, artist) VALUES ('Track 4', 'Artist D');");
     }).toThrow();
+
+    db.close();
+    expect(db.isOpen()).toBe(false);
+  });
+
+  it("supports read-write operations by default", () => {
+    const writer = new Database(tempDbPath);
+    writer.run("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);");
+    writer.run(`INSERT INTO schema_version (version) VALUES (${KNOWN_SCHEMA_VERSION});`);
+    writer.run("CREATE TABLE songs (id INTEGER PRIMARY KEY, title TEXT, artist TEXT);");
+    writer.run("INSERT INTO songs (title, artist) VALUES ('Track 1', 'Artist A');");
+    writer.close();
+
+    const db = new LuminousDatabase(tempDbPath);
+    const handle = db.getHandle();
+    expect(() => {
+      handle.run("INSERT INTO songs (title, artist) VALUES ('Track 2', 'Artist B');");
+    }).not.toThrow();
+    expect(db.getTrackCount()).toBe(2);
 
     db.close();
     expect(db.isOpen()).toBe(false);
