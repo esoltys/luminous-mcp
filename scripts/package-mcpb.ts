@@ -182,3 +182,5 @@ try {
     // Ignore cleanup error
   }
 }
+
+process.exit(0);
