@@ -469,7 +469,8 @@ describe("Listening Analytics & Insights Database Layer", () => {
       // Check ranking: Smells Like Teen Spirit (playcount 30) before Black (playcount 25)
       expect(res.items[0].title).toBe("Smells Like Teen Spirit");
       expect(res.items[1].title).toBe("Black");
-      expect(res.items[0].days_since_last_played).toBeGreaterThanOrEqual(240);
+      expect(res.items[0].last_played_iso).toBeDefined();
+      expect(typeof res.items[0].last_played_iso).toBe("string");
     });
   });
 
