@@ -15,6 +15,7 @@ import {
   type UpdateArtistProfileParams,
   type UpdateTrackMetadataParams,
 } from "../db/curation.ts";
+import { formatMcpResponse } from "../utils/response.ts";
 
 /**
  * Registers metadata hygiene and curation assistant tools on the MCP server instance.
@@ -83,14 +84,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const results = auditMetadata(handle, options);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -136,14 +130,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
           include_unassigned: params.include_unassigned,
         });
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -222,14 +209,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const results = updateTrackMetadata(handle, updateParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -295,14 +275,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
           };
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(profile, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(profile);
       } catch (err: any) {
         return {
           isError: true,
@@ -363,14 +336,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const result = updateArtistProfile(handle, updateParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(result);
       } catch (err: any) {
         return {
           isError: true,
@@ -446,14 +412,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const result = await lookupMusicBrainz(handle, lookupParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(result);
       } catch (err: any) {
         return {
           isError: true,
