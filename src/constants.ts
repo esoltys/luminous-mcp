@@ -23,3 +23,10 @@ export const WINDOWS_IDENTIFIER = "39231EricJamesSoltys.LuminousMusicPlayer";
 export const WINDOWS_FALLBACK_IDENTIFIER = "org.luminous.music";
 export const MACOS_IDENTIFIER = "org.luminous.music";
 export const LINUX_IDENTIFIER = "org.luminous.music";
+
+/**
+ * Default loopback host, port, and URL for Luminous desktop communication bridge.
+ */
+export const DEFAULT_BRIDGE_HOST = "127.0.0.1";
+export const DEFAULT_BRIDGE_PORT = 21849;
+export const DEFAULT_BRIDGE_URL = `http://${DEFAULT_BRIDGE_HOST}:${DEFAULT_BRIDGE_PORT}`;

@@ -12,11 +12,23 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Listening Analytics**: Inspect play counts, skip rates, top tracks/artists, and forgotten favorites.
 - **Playlist Management**: Query, generate, and populate static and dynamic playlists.
 - **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
-- **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next, seek, volume).
+- **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next/prev, seek, volume, shuffle, repeat) and queue replacement.
+- **Real-Time UI State Sync**: Non-blocking loopback notifications automatically signal running desktop instances to update playlist views immediately upon MCP mutations.
 
 ## Example Prompts
 
 Here are prompt examples demonstrating natural language queries you can ask your AI assistant:
+
+### Playback & Transport Control
+
+- "What is currently playing right now in Luminous?"
+- "Play track 'Strobe' by deadmau5 now."
+- "Pause playback."
+- "Set volume to 50%."
+- "Skip to the next song."
+- "Seek forward to 2 minutes 15 seconds."
+- "Turn on shuffle and set repeat mode to all."
+- "Replace the current queue with these tracks and begin playback."
 
 ### Music Discovery & Acoustic Filtering
 

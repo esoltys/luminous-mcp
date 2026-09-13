@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
   addTracksToPlaylist,
@@ -12,7 +13,11 @@ import { formatMcpResponse } from "../utils/response.ts";
 /**
  * Registers playlist management tools on the MCP server instance.
  */
-export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): void {
+export function registerPlaylistTools(
+  server: McpServer,
+  db: LuminousDatabase,
+  bridgeClient?: LuminousBridgeClient
+): void {
   server.tool(
     "list_playlists",
     "List all user playlists and dynamic/smart playlists in the Luminous music library, including item counts and creation timestamps.",
@@ -173,6 +178,13 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           track_ids: params.track_ids,
         });
 
+        // Emit real-time notification to running desktop player (non-blocking)
+        if (bridgeClient && results.playlist_id) {
+          await bridgeClient.notifyEvent("playlists-changed", {
+            playlist_id: results.playlist_id,
+          });
+        }
+
         return formatMcpResponse(results);
       } catch (err: any) {
         return {
@@ -238,6 +250,13 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           playlist_name: params.playlist_name,
           track_ids: params.track_ids,
         });
+
+        // Emit real-time notification to running desktop player (non-blocking)
+        if (bridgeClient && results.playlist_id) {
+          await bridgeClient.notifyEvent("playlists-changed", {
+            playlist_id: results.playlist_id,
+          });
+        }
 
         return formatMcpResponse(results);
       } catch (err: any) {

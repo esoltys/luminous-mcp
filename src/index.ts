@@ -4,7 +4,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./constants.ts";
 import { createMcpServer } from "./server.ts";
 
 async function main() {
-  const { server, db } = createMcpServer();
+  const { server, db, bridge } = createMcpServer();
   const transport = new StdioServerTransport();
 
   const shutdown = async () => {
@@ -26,6 +26,7 @@ async function main() {
   const stats = db.getStats();
   console.error(`${SERVER_NAME} v${SERVER_VERSION} running on stdio`);
   console.error(`Database target: ${stats.dbPath} (exists: ${stats.exists})`);
+  console.error(`Desktop bridge target: ${bridge.getBaseUrl()}`);
   if (stats.exists) {
     console.error(`Schema version: ${stats.schemaVersion}, songs: ${stats.trackCount}`);
   } else {
