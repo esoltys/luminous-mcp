@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { KNOWN_SCHEMA_VERSION } from "../src/constants.ts";
+import { LuminousBridgeClient } from "../src/bridge/client.ts";
 import {
   auditMetadata,
   extractBioLinks,
@@ -1231,5 +1232,163 @@ describe("MCP Curation Tools Integration", () => {
     await client.close();
     await server.close();
     db.close();
+  });
+
+  describe("Real-Time UI State Sync on Curation Mutations", () => {
+    let mockServer: any;
+    let mockBaseUrl: string;
+    let lastReceivedEvent: { event: string; data?: any } | null = null;
+
+    beforeEach(() => {
+      lastReceivedEvent = null;
+      mockServer = Bun.serve({
+        port: 0,
+        fetch(req) {
+          const url = new URL(req.url);
+          if (url.pathname === "/events/notify" && req.method === "POST") {
+            return req.json().then((body: any) => {
+              lastReceivedEvent = body;
+              return new Response(JSON.stringify({ success: true }), {
+                headers: { "Content-Type": "application/json" },
+              });
+            });
+          }
+          return new Response(JSON.stringify({ error: "Not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          });
+        },
+      });
+      mockBaseUrl = `http://127.0.0.1:${mockServer.port}`;
+    });
+
+    afterEach(() => {
+      mockServer?.stop(true);
+    });
+
+    it("triggers library-changed notification on update_artist_profile", async () => {
+      setupCurationTestDb(tempDbPath);
+      const bridgeClient = new LuminousBridgeClient({ baseUrl: mockBaseUrl });
+      const { server, db } = createMcpServer({
+        dbPath: tempDbPath,
+        bridgeClient,
+      });
+
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "artist-sync-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+
+      const res = await client.callTool({
+        name: "update_artist_profile",
+        arguments: {
+          artist: "GUNSHIP",
+          bio: "Synthwave band formed in 2014.",
+        },
+      });
+
+      expect((res as any).isError).toBeFalsy();
+      expect(lastReceivedEvent).not.toBeNull();
+      expect(lastReceivedEvent?.event).toBe("library-changed");
+      expect(lastReceivedEvent?.data?.entity).toBe("artist");
+      expect(lastReceivedEvent?.data?.artist).toBe("GUNSHIP");
+
+      await client.close();
+      await server.close();
+      db.close();
+    });
+
+    it("triggers library-changed notification on update_album_profile", async () => {
+      setupCurationTestDb(tempDbPath);
+      const bridgeClient = new LuminousBridgeClient({ baseUrl: mockBaseUrl });
+      const { server, db } = createMcpServer({
+        dbPath: tempDbPath,
+        bridgeClient,
+      });
+
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "album-sync-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+
+      const res = await client.callTool({
+        name: "update_album_profile",
+        arguments: {
+          album: "Unicorn",
+          artist: "GUNSHIP",
+          description: "Unicorn is the third studio album by GUNSHIP.",
+        },
+      });
+
+      expect((res as any).isError).toBeFalsy();
+      expect(lastReceivedEvent).not.toBeNull();
+      expect(lastReceivedEvent?.event).toBe("library-changed");
+      expect(lastReceivedEvent?.data?.entity).toBe("album");
+      expect(lastReceivedEvent?.data?.album).toBe("Unicorn");
+
+      await client.close();
+      await server.close();
+      db.close();
+    });
+
+    it("triggers library-changed notification on update_track_metadata", async () => {
+      setupCurationTestDb(tempDbPath);
+      const bridgeClient = new LuminousBridgeClient({ baseUrl: mockBaseUrl });
+      const { server, db } = createMcpServer({
+        dbPath: tempDbPath,
+        bridgeClient,
+      });
+
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "track-sync-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+
+      const res = await client.callTool({
+        name: "update_track_metadata",
+        arguments: {
+          track_id: 1,
+          genre: "Synthwave",
+        },
+      });
+
+      expect((res as any).isError).toBeFalsy();
+      expect(lastReceivedEvent).not.toBeNull();
+      expect(lastReceivedEvent?.event).toBe("library-changed");
+      expect(lastReceivedEvent?.data?.entity).toBe("track");
+      expect(lastReceivedEvent?.data?.track_ids).toEqual([1]);
+
+      await client.close();
+      await server.close();
+      db.close();
+    });
+
+    it("curation mutations succeed even if desktop player bridge is offline", async () => {
+      setupCurationTestDb(tempDbPath);
+      const offlineBridge = new LuminousBridgeClient({ baseUrl: "http://127.0.0.1:59999" });
+      const { server, db } = createMcpServer({
+        dbPath: tempDbPath,
+        bridgeClient: offlineBridge,
+      });
+
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "offline-sync-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+
+      const res = await client.callTool({
+        name: "update_album_profile",
+        arguments: {
+          album: "Unicorn",
+          description: "Offline update description.",
+        },
+      });
+
+      expect((res as any).isError).toBeFalsy();
+
+      await client.close();
+      await server.close();
+      db.close();
+    });
   });
 });
