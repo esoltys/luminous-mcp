@@ -413,8 +413,19 @@ describe("Library Database Functions", () => {
       expect(track.acoustic_measurements.bpm).toBe(125);
       expect(track.lyrics.has_lyrics).toBe(true);
       expect(track.lyrics.is_synced).toBe(true);
+      expect(track.lyrics.text).toBeNull();
       expect(track.identifiers.musicbrainz_recording_id).toBe("mb-rec-1");
       expect(track.identifiers.barcode).toBe("123456789");
+    });
+
+    it("includes lyrics text when include_lyrics is true", () => {
+      const track = getTrackDetails(db, 1, { include_lyrics: true });
+      expect(track).not.toBeNull();
+      if (!track) return;
+
+      expect(track.lyrics.has_lyrics).toBe(true);
+      expect(track.lyrics.is_synced).toBe(true);
+      expect(track.lyrics.text).toContain("Waiting in a car");
     });
 
     it("detects unsynchronized lyrics correctly", () => {
@@ -582,6 +593,36 @@ describe("MCP Library Tools Integration", () => {
     expect(parsed.technical_specs.file_type).toBe("FLAC");
     expect(parsed.metadata.comment).toBeUndefined();
     expect(parsed.identifiers?.musicbrainz_album_id).toBeUndefined();
+    expect(parsed.lyrics.has_lyrics).toBe(true);
+    expect(parsed.lyrics.text).toBeUndefined();
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls get_track_details tool via MCP with include_lyrics: true", async () => {
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "get_track_details",
+      arguments: {
+        track_id: 1,
+        include_lyrics: true,
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.id).toBe(1);
+    expect(parsed.lyrics.has_lyrics).toBe(true);
+    expect(parsed.lyrics.text).toContain("Waiting in a car");
 
     await client.close();
     await server.close();

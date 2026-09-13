@@ -103,6 +103,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .number()
         .int()
         .describe("The unique ID of the track in the Luminous database"),
+      include_lyrics: z
+        .boolean()
+        .default(false)
+        .optional()
+        .describe(
+          "Whether to include the full lyrics text in the response (default false to save tokens). Set to true only if lyrics are specifically needed."
+        ),
     },
     async (params) => {
       if (!db.exists()) {
@@ -119,7 +126,9 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
 
       try {
         const handle = db.getHandle();
-        const details = getTrackDetails(handle, params.track_id);
+        const details = getTrackDetails(handle, params.track_id, {
+          include_lyrics: params.include_lyrics,
+        });
 
         if (!details) {
           return {
