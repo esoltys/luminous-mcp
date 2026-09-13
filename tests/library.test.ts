@@ -476,6 +476,9 @@ describe("Library Database Functions", () => {
       expect(summary.found).toBe(true);
       expect(summary.total_tracks).toBe(2);
       expect(summary.total_albums).toBe(1);
+      expect(summary.total_collaborators).toBe(1);
+      expect(summary.total_composers).toBe(1);
+      expect(summary.total_producers).toBe(2);
       expect(summary.albums[0].name).toBe("Kind of Blue");
       expect(summary.albums[0].year).toBe(1959);
       expect(summary.genres).toContain("Jazz");
@@ -489,11 +492,27 @@ describe("Library Database Functions", () => {
       expect(summary.stats.most_played_tracks[0].play_count).toBe(20);
     });
 
+    it("caps collaborators, composers, and producers to max_associated_entities", () => {
+      // In the seed DB, Miles Davis has 1 collaborator, 1 composer, 2 producers.
+      // Testing with max_associated_entities: 0 returns empty array while preserving total count.
+      const summary = getArtistSummary(db, "Miles Davis", { max_associated_entities: 0 });
+      expect(summary.found).toBe(true);
+      expect(summary.total_collaborators).toBe(1);
+      expect(summary.total_composers).toBe(1);
+      expect(summary.total_producers).toBe(2);
+      expect(summary.collaborators).toHaveLength(0);
+      expect(summary.composers).toHaveLength(0);
+      expect(summary.producers).toHaveLength(0);
+    });
+
     it("returns empty result when artist is not found", () => {
       const summary = getArtistSummary(db, "Nonexistent Artist");
       expect(summary.found).toBe(false);
       expect(summary.total_tracks).toBe(0);
       expect(summary.total_albums).toBe(0);
+      expect(summary.total_collaborators).toBe(0);
+      expect(summary.total_composers).toBe(0);
+      expect(summary.total_producers).toBe(0);
     });
   });
 });
@@ -710,8 +729,39 @@ describe("MCP Library Tools Integration", () => {
 
     expect(parsed.found).toBe(true);
     expect(parsed.total_tracks).toBe(2);
+    expect(parsed.total_collaborators).toBe(1);
+    expect(parsed.total_composers).toBe(1);
+    expect(parsed.total_producers).toBe(2);
     expect(parsed.albums[0].name).toBe("Kind of Blue");
     expect(parsed.collaborators).toContain("John Coltrane");
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls get_artist_summary tool via MCP with max_associated_entities", async () => {
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "get_artist_summary",
+      arguments: {
+        artist: "Miles Davis",
+        max_associated_entities: 1,
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.found).toBe(true);
+    expect(parsed.total_collaborators).toBe(1);
+    expect(parsed.collaborators).toHaveLength(1);
 
     await client.close();
     await server.close();

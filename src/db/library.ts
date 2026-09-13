@@ -136,11 +136,18 @@ export interface ArtistAlbumItem {
   track_count: number;
 }
 
+export interface GetArtistSummaryOptions {
+  max_associated_entities?: number;
+}
+
 export interface ArtistSummary {
   artist: string;
   found: boolean;
   total_tracks: number;
   total_albums: number;
+  total_collaborators?: number;
+  total_composers?: number;
+  total_producers?: number;
   albums: ArtistAlbumItem[];
   genres: string[];
   collaborators: string[];
@@ -507,7 +514,12 @@ function escapeLike(str: string): string {
 /**
  * Aggregates artist catalog details, collaborators, genres, and listening statistics.
  */
-export function getArtistSummary(db: Database, artistName: string): ArtistSummary {
+export function getArtistSummary(
+  db: Database,
+  artistName: string,
+  options?: GetArtistSummaryOptions
+): ArtistSummary {
+  const maxEntities = options?.max_associated_entities ?? 20;
   const trimmed = artistName.trim();
   if (!trimmed) {
     return {
@@ -515,6 +527,9 @@ export function getArtistSummary(db: Database, artistName: string): ArtistSummar
       found: false,
       total_tracks: 0,
       total_albums: 0,
+      total_collaborators: 0,
+      total_composers: 0,
+      total_producers: 0,
       albums: [],
       genres: [],
       collaborators: [],
@@ -572,6 +587,9 @@ export function getArtistSummary(db: Database, artistName: string): ArtistSummar
       found: false,
       total_tracks: 0,
       total_albums: 0,
+      total_collaborators: 0,
+      total_composers: 0,
+      total_producers: 0,
       albums: [],
       genres: [],
       collaborators: [],
@@ -587,9 +605,9 @@ export function getArtistSummary(db: Database, artistName: string): ArtistSummar
 
   const albumMap = new Map<string, { year: number | null; count: number }>();
   const genreSet = new Set<string>();
-  const collaboratorSet = new Set<string>();
-  const composerSet = new Set<string>();
-  const producerSet = new Set<string>();
+  const collaboratorCounts = new Map<string, number>();
+  const composerCounts = new Map<string, number>();
+  const producerCounts = new Map<string, number>();
   let totalPlayCount = 0;
   let totalSkipCount = 0;
 
@@ -621,19 +639,19 @@ export function getArtistSummary(db: Database, artistName: string): ArtistSummar
 
     for (const c of splitMultiValue(row.composer)) {
       if (c.toLowerCase() !== targetLower) {
-        composerSet.add(c);
+        composerCounts.set(c, (composerCounts.get(c) ?? 0) + 1);
       }
     }
 
     for (const p of splitMultiValue(row.performer)) {
       if (p.toLowerCase() !== targetLower) {
-        producerSet.add(p);
+        producerCounts.set(p, (producerCounts.get(p) ?? 0) + 1);
       }
     }
 
     for (const a of splitMultiValue(row.artist)) {
       if (a.toLowerCase() !== targetLower) {
-        collaboratorSet.add(a);
+        collaboratorCounts.set(a, (collaboratorCounts.get(a) ?? 0) + 1);
       }
     }
   }
@@ -658,16 +676,35 @@ export function getArtistSummary(db: Database, artistName: string): ArtistSummar
     play_count: r.playcount ?? 0,
   }));
 
+  const rankByFrequency = (map: Map<string, number>, limit: number): string[] => {
+    return Array.from(map.entries())
+      .sort((a, b) => {
+        if (b[1] !== a[1]) {
+          return b[1] - a[1];
+        }
+        return a[0].localeCompare(b[0]);
+      })
+      .slice(0, limit)
+      .map(([item]) => item);
+  };
+
+  const totalCollaborators = collaboratorCounts.size;
+  const totalComposers = composerCounts.size;
+  const totalProducers = producerCounts.size;
+
   return {
     artist: trimmed,
     found: true,
     total_tracks: rows.length,
     total_albums: albumMap.size,
+    total_collaborators: totalCollaborators,
+    total_composers: totalComposers,
+    total_producers: totalProducers,
     albums,
     genres: Array.from(genreSet).sort(),
-    collaborators: Array.from(collaboratorSet).sort(),
-    composers: Array.from(composerSet).sort(),
-    producers: Array.from(producerSet).sort(),
+    collaborators: rankByFrequency(collaboratorCounts, maxEntities),
+    composers: rankByFrequency(composerCounts, maxEntities),
+    producers: rankByFrequency(producerCounts, maxEntities),
     stats: {
       total_play_count: totalPlayCount,
       total_skip_count: totalSkipCount,

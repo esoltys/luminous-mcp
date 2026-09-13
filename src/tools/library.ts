@@ -170,6 +170,16 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
     "Get a comprehensive summary of an artist in the local library, including total tracks, albums, genres, collaborators, composers, performers/producers, and listening statistics.",
     {
       artist: z.string().describe("Artist name to look up in the library"),
+      max_associated_entities: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(20)
+        .optional()
+        .describe(
+          "Maximum number of collaborators, composers, and producers to return in list arrays (default 20, max 100). Total counts are always returned."
+        ),
     },
     async (params) => {
       if (!db.exists()) {
@@ -186,7 +196,9 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
 
       try {
         const handle = db.getHandle();
-        const summary = getArtistSummary(handle, params.artist);
+        const summary = getArtistSummary(handle, params.artist, {
+          max_associated_entities: params.max_associated_entities,
+        });
 
         return formatMcpResponse(summary);
       } catch (err: any) {
