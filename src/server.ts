@@ -3,6 +3,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./constants.ts";
 import { LuminousDatabase } from "./db/connection.ts";
 import { resolveDbPath } from "./db/paths.ts";
 import { registerAnalyticsTools } from "./tools/analytics.ts";
+import { registerCurationTools } from "./tools/curation.ts";
 import { registerLibraryTools } from "./tools/library.ts";
 import { registerPlaylistTools } from "./tools/playlists.ts";
 import { registerSystemTools } from "./tools/system.ts";
@@ -33,6 +34,7 @@ export function createMcpServer(options: ServerOptions = {}): ServerContext {
   registerLibraryTools(server, db);
   registerAnalyticsTools(server, db);
   registerPlaylistTools(server, db);
+  registerCurationTools(server, db);
 
   return { server, db };
 }
