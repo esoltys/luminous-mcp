@@ -1132,6 +1132,55 @@ describe("MCP Curation Tools Integration", () => {
     db.close();
   });
 
+  describe("extractBioLinks", () => {
+    it("parses Wikipedia disambiguation URLs containing parentheses in markdown links", () => {
+      const bio =
+        "British synthwave band formed in 2014. [Wikipedia](https://en.wikipedia.org/wiki/Gunship_(band)) and [Official](https://gunshipmusic.com).";
+      const links = extractBioLinks(bio);
+
+      expect(links).toEqual([
+        {
+          title: "Wikipedia",
+          url: "https://en.wikipedia.org/wiki/Gunship_(band)",
+        },
+        {
+          title: "Official",
+          url: "https://gunshipmusic.com",
+        },
+      ]);
+    });
+
+    it("parses bare Wikipedia URLs with parentheses and preserves them", () => {
+      const bio =
+        "Formed in 2014: see https://en.wikipedia.org/wiki/Gunship_(band) for details.";
+      const links = extractBioLinks(bio);
+
+      expect(links).toEqual([
+        {
+          title: "en.wikipedia.org",
+          url: "https://en.wikipedia.org/wiki/Gunship_(band)",
+        },
+      ]);
+    });
+
+    it("strips unmatched closing parenthesis from prose surrounding bare URLs", () => {
+      const bio =
+        "Formed in 2014 (more details at https://gunshipmusic.com). Also see (https://en.wikipedia.org/wiki/Gunship_(band)).";
+      const links = extractBioLinks(bio);
+
+      expect(links).toEqual([
+        {
+          title: "gunshipmusic.com",
+          url: "https://gunshipmusic.com",
+        },
+        {
+          title: "en.wikipedia.org",
+          url: "https://en.wikipedia.org/wiki/Gunship_(band)",
+        },
+      ]);
+    });
+  });
+
   it("calls lookup_musicbrainz tool via MCP", async () => {
     setupCurationTestDb(tempDbPath);
     const { server, db } = createMcpServer({ dbPath: tempDbPath });

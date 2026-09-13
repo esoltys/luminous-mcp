@@ -274,7 +274,8 @@ export function extractBioLinks(text: string | null | undefined): BioSourceLink[
   const seenUrls = new Set<string>();
 
   // 1. Match markdown links: [Title](https://...)
-  const mdRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
+  // Support balanced/nested parentheses inside the target URL (e.g. Wikipedia disambiguation URLs)
+  const mdRegex = /\[([^\]]+)\]\((https?:\/\/(?:[^\s()]|\((?:[^\s()]|\([^\s()]*\))*\))+)\)/g;
   let match: RegExpExecArray | null;
 
   while ((match = mdRegex.exec(text)) !== null) {
@@ -288,10 +289,27 @@ export function extractBioLinks(text: string | null | undefined): BioSourceLink[
 
   // 2. Match bare URLs: https?://... (not already captured by markdown syntax)
   const textWithoutMd = text.replace(mdRegex, "");
-  const urlRegex = /(https?:\/\/[^\s\)\],]+)/g;
+  const urlRegex = /(https?:\/\/[^\s\],]+)/g;
   while ((match = urlRegex.exec(textWithoutMd)) !== null) {
     let url = match[1].trim();
-    url = url.replace(/[.,;:]+$/, "");
+    // Trim trailing punctuation, preserving balanced closing parentheses (e.g. Wikipedia URLs)
+    while (url.length > 0) {
+      const lastChar = url[url.length - 1];
+      if (/[.,;:]/.test(lastChar)) {
+        url = url.slice(0, -1);
+      } else if (lastChar === ")") {
+        const openCount = (url.match(/\(/g) || []).length;
+        const closeCount = (url.match(/\)/g) || []).length;
+        if (closeCount > openCount) {
+          url = url.slice(0, -1);
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
     if (url && !seenUrls.has(url)) {
       seenUrls.add(url);
       try {
