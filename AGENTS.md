@@ -30,6 +30,7 @@ A Model Context Protocol (MCP) server for Luminous Music Player, enabling AI ass
 - **Run tests**: `bun test`
 - **Run server**: `bun run start`
 - **Build**: `bun run build`
+- **Package bundle**: `bun run package` (Note for agents on Windows: `bun run package` / `scripts/package-mcpb.ts` can linger as a background task even after completing output due to lingering child stdio handles; check output for `Successfully generated MCP Bundles` or terminate the background task once output confirms success rather than waiting indefinitely).
 
 ## Issue Priority & Status Tracking
 
