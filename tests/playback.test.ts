@@ -512,6 +512,31 @@ describe("Luminous Desktop Playback & Transport Control Bridge", () => {
       mockPlaybackState.status = "playing";
     });
 
+    test("executes pause before track transition when stop_at is current_track_end", async () => {
+      lastControlParams = null;
+      // Position at 0.2s before end
+      mockPlaybackState.position_seconds = 636.8;
+      mockPlaybackState.duration_seconds = 637;
+
+      const res = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "schedule", stop_at: "current_track_end" },
+      });
+      expect(res.isError).toBeFalsy();
+      const parsed = JSON.parse((res.content as any)[0].text);
+      expect(parsed.stop_at).toBe("current_track_end");
+      expect(parsed.message).toContain("at the end of the song");
+
+      // Wait for watcher to detect timeLeft <= 0.3s and pause without advancing
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(lastControlParams).toBeDefined();
+      expect(lastControlParams.action).toBe("pause");
+
+      // Restore mockPlaybackState
+      mockPlaybackState.position_seconds = 120.5;
+    });
+
     test("returns descriptive error when desktop player is closed", async () => {
       const offlineBridge = new LuminousBridgeClient({ baseUrl: "http://127.0.0.1:59999" });
       const testDb = createTestDatabase();
