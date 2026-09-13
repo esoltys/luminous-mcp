@@ -297,13 +297,14 @@ describe("Luminous Desktop Playback & Transport Control Bridge", () => {
       serverContext.db.close();
     });
 
-    test("registers get_playback_state, control_playback, and play_tracks in MCP tools", async () => {
+    test("registers get_playback_state, control_playback, play_tracks, and pause_after_track in MCP tools", async () => {
       const tools = await client.listTools();
       const names = tools.tools.map((t) => t.name);
 
       expect(names).toContain("get_playback_state");
       expect(names).toContain("control_playback");
       expect(names).toContain("play_tracks");
+      expect(names).toContain("pause_after_track");
     });
 
     test("calls get_playback_state via MCP", async () => {
@@ -403,6 +404,112 @@ describe("Luminous Desktop Playback & Transport Control Bridge", () => {
       const parsed = JSON.parse(content[0].text);
       expect(parsed.success).toBe(true);
       expect(lastPlayTracksParams.track_ids).toEqual([1, 2, 3]);
+    });
+
+    test("calls pause_after_track with status when nothing is scheduled", async () => {
+      const res = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "status" },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const content = res.content as Array<{ type: string; text: string }>;
+      const parsed = JSON.parse(content[0].text);
+      expect(parsed.scheduled).toBe(false);
+      expect(parsed.message).toContain("No pause is currently scheduled");
+    });
+
+    test("calls pause_after_track with schedule when playing and checks status then cancel", async () => {
+      const res = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "schedule" },
+      });
+
+      expect(res.isError).toBeFalsy();
+      const content = res.content as Array<{ type: string; text: string }>;
+      const parsed = JSON.parse(content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.action).toBe("scheduled");
+      expect(parsed.track.id).toBe(42);
+      expect(parsed.track.title).toBe("Strobe");
+
+      // Verify status reflects scheduled watcher
+      const statusRes = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "status" },
+      });
+      const statusParsed = JSON.parse((statusRes.content as any)[0].text);
+      expect(statusParsed.scheduled).toBe(true);
+      expect(statusParsed.track.id).toBe(42);
+
+      // Cancel the scheduled pause
+      const cancelRes = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "cancel" },
+      });
+      const cancelParsed = JSON.parse((cancelRes.content as any)[0].text);
+      expect(cancelParsed.success).toBe(true);
+      expect(cancelParsed.action).toBe("cancelled");
+      expect(cancelParsed.message).toContain("Cancelled scheduled pause");
+    });
+
+    test("calls pause_after_track with schedule when player is paused", async () => {
+      mockPlaybackState.status = "paused";
+      try {
+        const res = await client.callTool({
+          name: "pause_after_track",
+          arguments: { action: "schedule" },
+        });
+
+        expect(res.isError).toBeFalsy();
+        const content = res.content as Array<{ type: string; text: string }>;
+        const parsed = JSON.parse(content[0].text);
+        expect(parsed.success).toBe(false);
+        expect(parsed.message).toContain("Playback is currently paused");
+      } finally {
+        mockPlaybackState.status = "playing";
+      }
+    });
+
+    test("executes pause and seek(0) when track transition is detected by watcher", async () => {
+      lastControlParams = null;
+      // Start near end of track (less than 1s remaining)
+      mockPlaybackState.position_seconds = 636.5;
+      mockPlaybackState.duration_seconds = 637;
+
+      const res = await client.callTool({
+        name: "pause_after_track",
+        arguments: { action: "schedule" },
+      });
+      expect(res.isError).toBeFalsy();
+
+      // Simulate track transition to next track in mock server
+      mockPlaybackState.current_track = {
+        id: 43,
+        title: "Ghosts n Stuff",
+        artist: "deadmau5",
+        duration_seconds: 328,
+      };
+      mockPlaybackState.position_seconds = 0.5;
+
+      // Wait for the tight poller loop to detect the change and fire controlPlayback
+      await new Promise((r) => setTimeout(r, 350));
+
+      expect(lastControlParams).toBeDefined();
+      expect(lastControlParams.action).toBe("seek");
+      expect(lastControlParams.position_seconds).toBe(0);
+
+      // Restore mockPlaybackState
+      mockPlaybackState.current_track = {
+        id: 42,
+        title: "Strobe",
+        artist: "deadmau5",
+        album: "For Lack of a Better Name",
+        duration_seconds: 637,
+        path: "/music/deadmau5/strobe.flac",
+      };
+      mockPlaybackState.position_seconds = 120.5;
+      mockPlaybackState.status = "playing";
     });
 
     test("returns descriptive error when desktop player is closed", async () => {
