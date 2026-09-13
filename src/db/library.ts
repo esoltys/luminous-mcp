@@ -38,24 +38,27 @@ export interface SearchLibraryParams {
   lufs_min?: number;
   lufs_max?: number;
   limit?: number;
+  detail_level?: DetailLevel;
 }
+
+export type DetailLevel = "compact" | "full";
 
 export interface SearchLibraryTrackItem {
   id: number;
   title: string | null;
   artist: string | null;
   album: string | null;
-  album_artist: string | null;
-  composer: string | null;
-  performer: string | null;
-  genre: string | null;
-  track: number | null;
-  disc: number | null;
   year: number | null;
-  bpm: number | null;
-  loudness_lufs: number | null;
   duration_seconds: number | null;
-  play_count: number;
+  album_artist?: string | null;
+  composer?: string | null;
+  performer?: string | null;
+  genre?: string | null;
+  track?: number | null;
+  disc?: number | null;
+  bpm?: number | null;
+  loudness_lufs?: number | null;
+  play_count?: number;
 }
 
 export interface SearchLibraryResult {
@@ -348,27 +351,44 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
     }
   }
 
-  const tracks: SearchLibraryTrackItem[] = rows.map((r) => ({
-    id: r.id,
-    title: r.title ?? null,
-    artist: r.artist ?? null,
-    album: r.album ?? null,
-    album_artist: r.album_artist ?? null,
-    composer: r.composer ?? null,
-    performer: r.performer ?? null,
-    genre: r.genre ?? null,
-    track: r.track ?? null,
-    disc: r.disc ?? null,
-    year: r.year ?? null,
-    bpm: r.bpm != null ? Math.round(r.bpm * 10) / 10 : null,
-    loudness_lufs:
-      r.ebur128_integrated_loudness_lufs != null
-        ? Math.round(r.ebur128_integrated_loudness_lufs * 100) / 100
-        : null,
-    duration_seconds:
-      r.length_nanosec != null ? Math.round((r.length_nanosec / 1e9) * 100) / 100 : null,
-    play_count: r.playcount ?? 0,
-  }));
+  const detailLevel = params.detail_level ?? "compact";
+
+  const tracks: SearchLibraryTrackItem[] = rows.map((r) => {
+    const durationSeconds =
+      r.length_nanosec != null ? Math.round((r.length_nanosec / 1e9) * 100) / 100 : null;
+
+    if (detailLevel === "compact") {
+      return {
+        id: r.id,
+        title: r.title ?? null,
+        artist: r.artist ?? null,
+        album: r.album ?? null,
+        year: r.year ?? null,
+        duration_seconds: durationSeconds,
+      };
+    }
+
+    return {
+      id: r.id,
+      title: r.title ?? null,
+      artist: r.artist ?? null,
+      album: r.album ?? null,
+      album_artist: r.album_artist ?? null,
+      composer: r.composer ?? null,
+      performer: r.performer ?? null,
+      genre: r.genre ?? null,
+      track: r.track ?? null,
+      disc: r.disc ?? null,
+      year: r.year ?? null,
+      bpm: r.bpm != null ? Math.round(r.bpm * 10) / 10 : null,
+      loudness_lufs:
+        r.ebur128_integrated_loudness_lufs != null
+          ? Math.round(r.ebur128_integrated_loudness_lufs * 100) / 100
+          : null,
+      duration_seconds: durationSeconds,
+      play_count: r.playcount ?? 0,
+    };
+  });
 
   return {
     count: tracks.length,

@@ -47,6 +47,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .default(25)
         .optional()
         .describe("Maximum results to return (default 25, max 100)"),
+      detail_level: z
+        .enum(["compact", "full"])
+        .default("compact")
+        .optional()
+        .describe(
+          "Granularity of track details: 'compact' (default) returns essential fields (id, title, artist, album, year, duration_seconds); 'full' returns all metadata including composer, performer, genre, track/disc, bpm, loudness, and play counts."
+        ),
     },
     async (params) => {
       if (!db.exists()) {
@@ -76,6 +83,7 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
           lufs_min: params.lufs_min,
           lufs_max: params.lufs_max,
           limit: params.limit,
+          detail_level: params.detail_level,
         };
 
         const results = searchLibrary(handle, searchParams);
