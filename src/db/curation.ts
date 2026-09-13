@@ -107,12 +107,18 @@ export interface UpdateTrackMetadataResult {
   tracks: UpdatedTrackItem[];
 }
 
+export interface BioSourceLink {
+  title: string;
+  url: string;
+}
+
 export interface ArtistProfile {
   artist: string;
   bio: string | null;
   website: string | null;
   tags: string[];
   social_links: Array<{ platform?: string; handle_or_url?: string } | string>;
+  sources?: BioSourceLink[];
   wikipedia: {
     extract: string | null;
     page_url: string | null;
@@ -128,6 +134,7 @@ export interface UpdateArtistProfileParams {
   website?: string | null;
   tags?: string[];
   social_links?: Array<{ platform?: string; handle_or_url?: string } | string>;
+  links?: Array<{ platform?: string; handle_or_url?: string } | string>;
 }
 
 export interface UpdateArtistProfileResult {
@@ -135,6 +142,49 @@ export interface UpdateArtistProfileResult {
   artist: string;
   updated_fields: Record<string, unknown>;
   profile: ArtistProfile;
+}
+
+export interface AlbumLinkItem {
+  platform?: string;
+  title?: string;
+  url: string;
+  category?: string;
+}
+
+export interface AlbumProfile {
+  album: string;
+  artist: string | null;
+  description: string | null;
+  website: string | null;
+  tags: string[];
+  links: Array<AlbumLinkItem | string>;
+  sources?: BioSourceLink[];
+  release_group_mbid?: string | null;
+  context_enrichment?: {
+    mb_rating: number | null;
+    mb_rating_votes: number | null;
+    mb_tags: string[];
+    mb_release_country: string | null;
+    critiquebrainz_rating: number | null;
+    critiquebrainz_review_count: number | null;
+    critiquebrainz_review_links: string[];
+  } | null;
+}
+
+export interface UpdateAlbumProfileParams {
+  album: string;
+  artist?: string | null;
+  description?: string | null;
+  website?: string | null;
+  tags?: string[];
+  links?: Array<AlbumLinkItem | string>;
+}
+
+export interface UpdateAlbumProfileResult {
+  success: boolean;
+  album: string;
+  updated_fields: Record<string, unknown>;
+  profile: AlbumProfile;
 }
 
 export type MusicBrainzEntityType =
@@ -199,6 +249,61 @@ export function hasTable(db: Database, tableName: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Checks if a column exists in a given table in the SQLite database.
+ */
+export function hasColumn(db: Database, tableName: string, columnName: string): boolean {
+  try {
+    const columns = db.query<{ name: string }, []>(`PRAGMA table_info(${tableName})`).all();
+    return columns.some((col) => col.name.toLowerCase() === columnName.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extracts structured citation links from biography or description text.
+ * Parses both Markdown-style links [Title](https://...) and bare URLs (https://...).
+ */
+export function extractBioLinks(text: string | null | undefined): BioSourceLink[] {
+  if (!text || typeof text !== "string") return [];
+
+  const results: BioSourceLink[] = [];
+  const seenUrls = new Set<string>();
+
+  // 1. Match markdown links: [Title](https://...)
+  const mdRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = mdRegex.exec(text)) !== null) {
+    const title = match[1].trim();
+    const url = match[2].trim();
+    if (url && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      results.push({ title, url });
+    }
+  }
+
+  // 2. Match bare URLs: https?://... (not already captured by markdown syntax)
+  const textWithoutMd = text.replace(mdRegex, "");
+  const urlRegex = /(https?:\/\/[^\s\)\],]+)/g;
+  while ((match = urlRegex.exec(textWithoutMd)) !== null) {
+    let url = match[1].trim();
+    url = url.replace(/[.,;:]+$/, "");
+    if (url && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      try {
+        const parsedUrl = new URL(url);
+        results.push({ title: parsedUrl.hostname.replace(/^www\./, ""), url });
+      } catch {
+        results.push({ title: url, url });
+      }
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -770,12 +875,15 @@ export function getArtistProfile(
     }
   }
 
+  const bioSources = extractBioLinks(rawProfile?.bio);
+
   return {
     artist: rawProfile?.artist_key ?? resolvedArtistName,
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
     social_links: parsedSocial,
+    sources: bioSources.length > 0 ? bioSources : undefined,
     wikipedia: rawContext
       ? {
           extract: rawContext.wikipedia_extract,
@@ -801,11 +909,13 @@ export function updateArtistProfile(
     throw new Error("Artist name must not be empty.");
   }
 
+  const effectiveSocial = params.social_links !== undefined ? params.social_links : params.links;
+
   if (
     params.bio === undefined &&
     params.website === undefined &&
     params.tags === undefined &&
-    params.social_links === undefined
+    effectiveSocial === undefined
   ) {
     throw new Error(
       "At least one profile field (bio, website, tags, social_links) must be provided."
@@ -834,15 +944,15 @@ export function updateArtistProfile(
   const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
   const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
   const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
-  const newSocial = params.social_links !== undefined
-    ? JSON.stringify(params.social_links)
+  const newSocial = effectiveSocial !== undefined
+    ? JSON.stringify(effectiveSocial)
     : (existing?.social_links ?? "[]");
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.website !== undefined) fieldsUpdated.website = params.website;
   if (params.bio !== undefined) fieldsUpdated.bio = params.bio;
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
-  if (params.social_links !== undefined) fieldsUpdated.social_links = params.social_links;
+  if (effectiveSocial !== undefined) fieldsUpdated.social_links = effectiveSocial;
 
   db.run(
     `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
@@ -860,6 +970,252 @@ export function updateArtistProfile(
   return {
     success: true,
     artist: keyToUse,
+    updated_fields: fieldsUpdated,
+    profile: updatedProfile,
+  };
+}
+
+/**
+ * Retrieves an album's curated profile (description, website, tags, links/sources)
+ * and MusicBrainz release-group context enrichment from the database.
+ */
+export function getAlbumProfile(
+  db: Database,
+  options: { album?: string; release_group_id?: string }
+): AlbumProfile | null {
+  const albumName = options.album?.trim();
+  let releaseGroupMbid = options.release_group_id?.trim() ?? null;
+
+  if (!albumName && !releaseGroupMbid) {
+    throw new Error("Either album or release_group_id must be provided.");
+  }
+
+  let resolvedAlbumName = albumName ?? "";
+  let resolvedArtistName: string | null = null;
+  let songFound = false;
+
+  if (hasTable(db, "songs")) {
+    if (albumName && !releaseGroupMbid) {
+      const hasMbRg = hasColumn(db, "songs", "musicbrainz_release_group_id");
+      const querySql = hasMbRg
+        ? "SELECT album, album_artist, artist, musicbrainz_release_group_id FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1"
+        : "SELECT album, album_artist, artist FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1";
+      const songRow = db.query<any, [string]>(querySql).get(albumName);
+      if (songRow) {
+        songFound = true;
+        resolvedAlbumName = songRow.album ?? albumName;
+        resolvedArtistName = songRow.album_artist || songRow.artist || null;
+        if (songRow.musicbrainz_release_group_id) {
+          releaseGroupMbid = songRow.musicbrainz_release_group_id;
+        }
+      }
+    } else if (releaseGroupMbid && !albumName) {
+      if (hasColumn(db, "songs", "musicbrainz_release_group_id")) {
+        const songRow = db
+          .query<any, [string]>(
+            "SELECT album, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1"
+          )
+          .get(releaseGroupMbid);
+        if (songRow && songRow.album) {
+          songFound = true;
+          resolvedAlbumName = songRow.album;
+          resolvedArtistName = songRow.album_artist || songRow.artist || null;
+        }
+      }
+    }
+  }
+
+  interface RawAlbumProfile {
+    album_key: string;
+    artist_key: string | null;
+    description: string | null;
+    website: string | null;
+    tags: string;
+    links: string;
+  }
+
+  let rawProfile: RawAlbumProfile | null = null;
+  if (hasTable(db, "album_profiles")) {
+    if (resolvedAlbumName) {
+      rawProfile = db
+        .query<RawAlbumProfile, [string]>(
+          "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+        )
+        .get(resolvedAlbumName);
+    }
+  }
+
+  interface RawReleaseContext {
+    release_group_id: string;
+    mb_rating: number | null;
+    mb_rating_votes: number | null;
+    mb_tags: string;
+    mb_release_country: string | null;
+    critiquebrainz_rating: number | null;
+    critiquebrainz_review_count: number | null;
+    critiquebrainz_review_links: string;
+  }
+
+  let rawContext: RawReleaseContext | null = null;
+  if (releaseGroupMbid && hasTable(db, "context_enrichment")) {
+    rawContext = db
+      .query<RawReleaseContext, [string]>(
+        "SELECT release_group_id, mb_rating, mb_rating_votes, mb_tags, mb_release_country, critiquebrainz_rating, critiquebrainz_review_count, critiquebrainz_review_links FROM context_enrichment WHERE release_group_id = ?1"
+      )
+      .get(releaseGroupMbid);
+  }
+
+  if (!rawProfile && !rawContext && !songFound) {
+    return null;
+  }
+
+  let parsedTags: string[] = [];
+  if (rawProfile?.tags) {
+    try {
+      parsedTags = JSON.parse(rawProfile.tags);
+    } catch {
+      parsedTags = [];
+    }
+  }
+
+  let parsedLinks: Array<AlbumLinkItem | string> = [];
+  if (rawProfile?.links) {
+    try {
+      parsedLinks = JSON.parse(rawProfile.links);
+    } catch {
+      parsedLinks = [];
+    }
+  }
+
+  let contextEnrichment: AlbumProfile["context_enrichment"] = null;
+  if (rawContext) {
+    let mbTags: string[] = [];
+    try {
+      mbTags = JSON.parse(rawContext.mb_tags);
+    } catch {
+      mbTags = [];
+    }
+    let reviewLinks: string[] = [];
+    try {
+      reviewLinks = JSON.parse(rawContext.critiquebrainz_review_links);
+    } catch {
+      reviewLinks = [];
+    }
+    contextEnrichment = {
+      mb_rating: rawContext.mb_rating,
+      mb_rating_votes: rawContext.mb_rating_votes,
+      mb_tags: mbTags,
+      mb_release_country: rawContext.mb_release_country,
+      critiquebrainz_rating: rawContext.critiquebrainz_rating,
+      critiquebrainz_review_count: rawContext.critiquebrainz_review_count,
+      critiquebrainz_review_links: reviewLinks,
+    };
+  }
+
+  const bioSources = extractBioLinks(rawProfile?.description);
+
+  return {
+    album: rawProfile?.album_key ?? resolvedAlbumName,
+    artist: rawProfile?.artist_key ?? resolvedArtistName,
+    description: rawProfile?.description ?? null,
+    website: rawProfile?.website ?? null,
+    tags: parsedTags,
+    links: parsedLinks,
+    sources: bioSources.length > 0 ? bioSources : undefined,
+    release_group_mbid: releaseGroupMbid,
+    context_enrichment: contextEnrichment,
+  };
+}
+
+/**
+ * Creates or updates an album's curated profile (description, artist, website, tags, links/sources)
+ * in the Luminous database.
+ */
+export function updateAlbumProfile(
+  db: Database,
+  params: UpdateAlbumProfileParams
+): UpdateAlbumProfileResult {
+  const albumName = params.album?.trim();
+  if (!albumName) {
+    throw new Error("Album name must not be empty.");
+  }
+
+  if (
+    params.description === undefined &&
+    params.website === undefined &&
+    params.tags === undefined &&
+    params.links === undefined &&
+    params.artist === undefined
+  ) {
+    throw new Error(
+      "At least one profile field (description, website, tags, links, artist) must be provided."
+    );
+  }
+
+  // Ensure table exists
+  db.run(`
+    CREATE TABLE IF NOT EXISTS album_profiles (
+      album_key TEXT PRIMARY KEY,
+      artist_key TEXT,
+      description TEXT,
+      website TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      links TEXT NOT NULL DEFAULT '[]'
+    );
+  `);
+
+  // Check existing row
+  const existing = db
+    .query<
+      {
+        album_key: string;
+        artist_key: string | null;
+        description: string | null;
+        website: string | null;
+        tags: string;
+        links: string;
+      },
+      [string]
+    >(
+      "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+    )
+    .get(albumName);
+
+  const keyToUse = existing?.album_key ?? albumName;
+  const newArtist = params.artist !== undefined ? params.artist : (existing?.artist_key ?? null);
+  const newDescription =
+    params.description !== undefined ? params.description : (existing?.description ?? null);
+  const newWebsite =
+    params.website !== undefined ? params.website : (existing?.website ?? null);
+  const newTags =
+    params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
+  const newLinks =
+    params.links !== undefined ? JSON.stringify(params.links) : (existing?.links ?? "[]");
+
+  const fieldsUpdated: Record<string, unknown> = {};
+  if (params.artist !== undefined) fieldsUpdated.artist = params.artist;
+  if (params.description !== undefined) fieldsUpdated.description = params.description;
+  if (params.website !== undefined) fieldsUpdated.website = params.website;
+  if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
+  if (params.links !== undefined) fieldsUpdated.links = params.links;
+
+  db.run(
+    `INSERT INTO album_profiles (album_key, artist_key, description, website, tags, links)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(album_key) DO UPDATE SET
+       artist_key = excluded.artist_key,
+       description = excluded.description,
+       website = excluded.website,
+       tags = excluded.tags,
+       links = excluded.links`,
+    [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
+  );
+
+  const updatedProfile = getAlbumProfile(db, { album: keyToUse })!;
+
+  return {
+    success: true,
+    album: keyToUse,
     updated_fields: fieldsUpdated,
     profile: updatedProfile,
   };

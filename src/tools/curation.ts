@@ -3,15 +3,18 @@ import { z } from "zod";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
   auditMetadata,
+  getAlbumProfile,
   getArtistProfile,
   getGenreHierarchy,
   lookupMusicBrainz,
+  updateAlbumProfile,
   updateArtistProfile,
   updateTrackMetadata,
   type AuditMetadataOptions,
   type LookupMusicBrainzParams,
   type MissingMetadataField,
   type MusicBrainzEntityType,
+  type UpdateAlbumProfileParams,
   type UpdateArtistProfileParams,
   type UpdateTrackMetadataParams,
 } from "../db/curation.ts";
@@ -226,7 +229,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
   server.tool(
     "get_artist_profile",
-    "Get an artist's curated profile (biography, official website, tags, social links, Wikipedia extract, and MusicBrainz ID).",
+    "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID).",
     {
       artist: z.string().optional().describe("Artist name to inspect"),
       artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
@@ -292,10 +295,13 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
   server.tool(
     "update_artist_profile",
-    "Update or create an artist's curated profile (biography, official website URL, tags, social media links) in the Luminous database.",
+    "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. Biographies support Markdown links ([Source](url)) to cite references.",
     {
       artist: z.string().min(1).describe("Artist name whose profile is being updated"),
-      bio: z.string().optional().describe("Biographical notes or summary for the artist"),
+      bio: z
+        .string()
+        .optional()
+        .describe("Biographical notes or summary for the artist (supports markdown links [Source](url) to cite references)"),
       website: z.string().optional().describe("Official website URL for the artist"),
       tags: z.array(z.string()).optional().describe("Curated tags or style labels for the artist"),
       social_links: z
@@ -310,6 +316,18 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
         )
         .optional()
         .describe("Social media profile URLs or platform handles"),
+      links: z
+        .array(
+          z.union([
+            z.object({
+              platform: z.string().optional(),
+              handle_or_url: z.string().optional(),
+            }),
+            z.string(),
+          ])
+        )
+        .optional()
+        .describe("External links, sources, or reference URLs (alias for social_links)"),
     },
     async (params) => {
       if (!db.exists()) {
@@ -332,6 +350,7 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
           website: params.website,
           tags: params.tags,
           social_links: params.social_links as any,
+          links: params.links as any,
         };
 
         const result = updateArtistProfile(handle, updateParams);
@@ -344,6 +363,140 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
             {
               type: "text" as const,
               text: `Failed to update artist profile: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.tool(
+    "get_album_profile",
+    "Get an album's curated profile (description/liner notes with cited sources, official website, tags, external source/review links, and MusicBrainz release-group context enrichment).",
+    {
+      album: z.string().optional().describe("Album title to inspect"),
+      release_group_id: z.string().optional().describe("MusicBrainz release group UUID"),
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+
+      if (!params.album && !params.release_group_id) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: "Either album or release_group_id must be provided.",
+            },
+          ],
+        };
+      }
+
+      try {
+        const handle = db.getHandle();
+        const profile = getAlbumProfile(handle, {
+          album: params.album,
+          release_group_id: params.release_group_id,
+        });
+
+        if (!profile) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: `Album profile not found for: "${params.album ?? params.release_group_id}".`,
+              },
+            ],
+          };
+        }
+
+        return formatMcpResponse(profile);
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to retrieve album profile: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.tool(
+    "update_album_profile",
+    "Update or create an album's curated profile (description, artist association, official website URL, tags, external source/review/storefront links) in the Luminous database. Descriptions support Markdown links ([Source](url)) to cite references.",
+    {
+      album: z.string().min(1).describe("Album title whose profile is being updated"),
+      artist: z.string().optional().describe("Associated album artist or primary artist name"),
+      description: z
+        .string()
+        .optional()
+        .describe("Curated album description, liner notes, or critical summary (supports markdown links [Source](url) to cite references)"),
+      website: z.string().optional().describe("Official album landing page, Bandcamp URL, or release website"),
+      tags: z.array(z.string()).optional().describe("Curated tags or style descriptors for the album"),
+      links: z
+        .array(
+          z.union([
+            z.object({
+              platform: z.string().optional().describe("Platform name (e.g. 'bandcamp', 'discogs', 'pitchfork', 'wikipedia')"),
+              title: z.string().optional().describe("Display title (e.g. 'Pitchfork Review', 'Bandcamp Store')"),
+              url: z.string().describe("Target URL"),
+              category: z.string().optional().describe("Link category (e.g. 'review', 'store', 'source', 'official')"),
+            }),
+            z.string(),
+          ])
+        )
+        .optional()
+        .describe("External links, reviews, storefronts, or reference sources"),
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+
+      try {
+        const handle = db.getHandle();
+        const updateParams: UpdateAlbumProfileParams = {
+          album: params.album,
+          artist: params.artist,
+          description: params.description,
+          website: params.website,
+          tags: params.tags,
+          links: params.links as any,
+        };
+
+        const result = updateAlbumProfile(handle, updateParams);
+
+        return formatMcpResponse(result);
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to update album profile: ${err.message ?? String(err)}`,
             },
           ],
         };

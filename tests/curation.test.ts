@@ -8,9 +8,12 @@ import * as path from "node:path";
 import { KNOWN_SCHEMA_VERSION } from "../src/constants.ts";
 import {
   auditMetadata,
+  extractBioLinks,
+  getAlbumProfile,
   getArtistProfile,
   getGenreHierarchy,
   lookupMusicBrainz,
+  updateAlbumProfile,
   updateArtistProfile,
   updateTrackMetadata,
 } from "../src/db/curation.ts";
@@ -133,6 +136,17 @@ function setupCurationTestDb(dbPath: string): Database {
   `);
 
   db.run(`
+    CREATE TABLE album_profiles (
+      album_key TEXT PRIMARY KEY,
+      artist_key TEXT,
+      description TEXT,
+      website TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      links TEXT NOT NULL DEFAULT '[]'
+    );
+  `);
+
+  db.run(`
     CREATE TABLE artist_context_enrichment (
       artist_id TEXT PRIMARY KEY,
       wikidata_id TEXT,
@@ -240,6 +254,10 @@ function setupCurationTestDb(dbPath: string): Database {
   db.run(`
     INSERT INTO context_enrichment (release_group_id, mb_rating, critiquebrainz_rating, mb_tags, mb_release_country, critiquebrainz_review_count, critiquebrainz_review_links, fetched_at)
     VALUES ('68ee0e21-a7c2-467d-8808-fd38fec2ffb8', 4.5, 4.0, '["progressive metal"]', 'CA', 2, '[]', 1789280000);
+  `);
+  db.run(`
+    INSERT INTO album_profiles (album_key, artist_key, description, website, tags, links)
+    VALUES ('Clean Album', 'Clean Artist', 'Acclaimed progressive metal masterpiece. Sources: [Wikipedia](https://en.wikipedia.org/wiki/Clean_Album) and [Pitchfork Review](https://pitchfork.com/reviews/clean-album). Also see https://bandcamp.com/clean-album', 'https://cleanartist.example.com/clean-album', '["concept album","remaster"]', '[{"platform":"bandcamp","title":"Bandcamp Store","url":"https://cleanartist.bandcamp.com/album/clean-album","category":"store"}]');
   `);
 
   return db;
@@ -640,6 +658,180 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
     });
   });
 
+  describe("extractBioLinks", () => {
+    it("extracts markdown links and bare URLs without duplicate entries", () => {
+      const text =
+        "Debut studio album released in 2021. Citations: [Wikipedia Article](https://en.wikipedia.org/wiki/Clean_Album) and [Pitchfork Review](https://pitchfork.com/reviews/clean-album). Also check https://bandcamp.com/clean-album and https://cleanartist.example.com.";
+      const links = extractBioLinks(text);
+
+      expect(links.length).toBe(4);
+      expect(links[0]).toEqual({
+        title: "Wikipedia Article",
+        url: "https://en.wikipedia.org/wiki/Clean_Album",
+      });
+      expect(links[1]).toEqual({
+        title: "Pitchfork Review",
+        url: "https://pitchfork.com/reviews/clean-album",
+      });
+      expect(links[2]).toEqual({
+        title: "bandcamp.com",
+        url: "https://bandcamp.com/clean-album",
+      });
+      expect(links[3]).toEqual({
+        title: "cleanartist.example.com",
+        url: "https://cleanartist.example.com",
+      });
+    });
+
+    it("returns empty array for text with no links or null/undefined", () => {
+      expect(extractBioLinks("Just plain text with no links.")).toEqual([]);
+      expect(extractBioLinks(null)).toEqual([]);
+      expect(extractBioLinks(undefined)).toEqual([]);
+    });
+  });
+
+  describe("getAlbumProfile", () => {
+    it("retrieves album profile by album name with tags, links, and extracted sources", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const profile = getAlbumProfile(db, { album: "Clean Album" });
+
+      expect(profile).not.toBeNull();
+      expect(profile?.album).toBe("Clean Album");
+      expect(profile?.artist).toBe("Clean Artist");
+      expect(profile?.website).toBe("https://cleanartist.example.com/clean-album");
+      expect(profile?.description).toContain("Acclaimed progressive metal masterpiece.");
+      expect(profile?.tags).toEqual(["concept album", "remaster"]);
+      expect(profile?.links.length).toBe(1);
+      expect(profile?.release_group_mbid).toBe("68ee0e21-a7c2-467d-8808-fd38fec2ffb8");
+
+      // Verify sources extracted from markdown description
+      expect(profile?.sources).toBeDefined();
+      expect(profile?.sources?.length).toBe(3);
+      expect(profile?.sources?.[0].title).toBe("Wikipedia");
+      expect(profile?.sources?.[0].url).toBe("https://en.wikipedia.org/wiki/Clean_Album");
+      expect(profile?.sources?.[1].title).toBe("Pitchfork Review");
+      expect(profile?.sources?.[1].url).toBe("https://pitchfork.com/reviews/clean-album");
+      expect(profile?.sources?.[2].url).toBe("https://bandcamp.com/clean-album");
+
+      // Verify context enrichment
+      expect(profile?.context_enrichment).toBeDefined();
+      expect(profile?.context_enrichment?.mb_rating).toBe(4.5);
+      expect(profile?.context_enrichment?.mb_release_country).toBe("CA");
+
+      db.close();
+    });
+
+    it("retrieves album profile by release_group_id MBID", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const profile = getAlbumProfile(db, {
+        release_group_id: "68ee0e21-a7c2-467d-8808-fd38fec2ffb8",
+      });
+
+      expect(profile).not.toBeNull();
+      expect(profile?.album).toBe("Clean Album");
+      expect(profile?.release_group_mbid).toBe("68ee0e21-a7c2-467d-8808-fd38fec2ffb8");
+
+      db.close();
+    });
+
+    it("returns null when album is not found in database", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const profile = getAlbumProfile(db, { album: "Nonexistent Album" });
+
+      expect(profile).toBeNull();
+
+      db.close();
+    });
+
+    it("throws error when neither album nor release_group_id is provided", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        getAlbumProfile(db, {});
+      }).toThrow("Either album or release_group_id must be provided");
+
+      db.close();
+    });
+  });
+
+  describe("updateAlbumProfile", () => {
+    it("creates a new album profile when none exists", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const result = updateAlbumProfile(db, {
+        album: "New Album",
+        artist: "New Artist",
+        description: "Fresh new release notes citing [AllMusic](https://www.allmusic.com/album/new).",
+        website: "https://newalbum.example.com",
+        tags: ["debut", "electronic"],
+        links: [
+          {
+            platform: "bandcamp",
+            title: "Bandcamp",
+            url: "https://newartist.bandcamp.com/album/new",
+            category: "store",
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.album).toBe("New Album");
+      expect(result.profile.artist).toBe("New Artist");
+      expect(result.profile.description).toContain("Fresh new release notes");
+      expect(result.profile.website).toBe("https://newalbum.example.com");
+      expect(result.profile.tags).toEqual(["debut", "electronic"]);
+      expect(result.profile.links.length).toBe(1);
+      expect(result.profile.sources?.length).toBe(1);
+      expect(result.profile.sources?.[0]).toEqual({
+        title: "AllMusic",
+        url: "https://www.allmusic.com/album/new",
+      });
+
+      db.close();
+    });
+
+    it("updates an existing album profile preserving untouched fields", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const result = updateAlbumProfile(db, {
+        album: "Clean Album",
+        description: "Updated description for clean album with [Rolling Stone](https://rollingstone.com/clean).",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.profile.description).toContain("Updated description for clean album");
+      expect(result.profile.website).toBe("https://cleanartist.example.com/clean-album");
+      expect(result.profile.tags).toEqual(["concept album", "remaster"]);
+      expect(result.profile.artist).toBe("Clean Artist");
+      expect(result.profile.sources?.[0].title).toBe("Rolling Stone");
+
+      db.close();
+    });
+
+    it("rejects update when album name is empty", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateAlbumProfile(db, { album: "", description: "Hello" });
+      }).toThrow("Album name must not be empty");
+
+      db.close();
+    });
+
+    it("rejects update when no fields are specified", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateAlbumProfile(db, { album: "Some Album" });
+      }).toThrow("At least one profile field");
+
+      db.close();
+    });
+  });
+
   describe("lookupMusicBrainz", () => {
     it("looks up track MBIDs and returns local context enrichment", async () => {
       const db = setupCurationTestDb(tempDbPath);
@@ -857,6 +1049,83 @@ describe("MCP Curation Tools Integration", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.profile.bio).toBe("Updated bio via MCP tool call.");
     expect(parsed.profile.website).toBe("https://cleanartist.org");
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls get_album_profile tool via MCP", async () => {
+    setupCurationTestDb(tempDbPath);
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "get_album_profile",
+      arguments: {
+        album: "Clean Album",
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.album).toBe("Clean Album");
+    expect(parsed.artist).toBe("Clean Artist");
+    expect(parsed.tags).toContain("concept album");
+    expect(parsed.links.length).toBe(1);
+    expect(parsed.sources.length).toBe(3);
+    expect(parsed.sources[0].title).toBe("Wikipedia");
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls update_album_profile tool via MCP", async () => {
+    setupCurationTestDb(tempDbPath);
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "update_album_profile",
+      arguments: {
+        album: "Clean Album",
+        description: "Curated masterpiece with [Pitchfork Review](https://pitchfork.com/clean) reference.",
+        website: "https://cleanartist.org/album",
+        tags: ["progressive metal", "masterpiece"],
+        links: [
+          {
+            platform: "bandcamp",
+            title: "Bandcamp",
+            url: "https://cleanartist.bandcamp.com",
+          },
+        ],
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.album).toBe("Clean Album");
+    expect(parsed.profile.description).toContain("Curated masterpiece");
+    expect(parsed.profile.website).toBe("https://cleanartist.org/album");
+    expect(parsed.profile.tags).toEqual(["progressive metal", "masterpiece"]);
+    expect(parsed.profile.links.length).toBe(1);
+    expect(parsed.profile.sources.length).toBe(1);
+    expect(parsed.profile.sources[0]).toEqual({
+      title: "Pitchfork Review",
+      url: "https://pitchfork.com/clean",
+    });
 
     await client.close();
     await server.close();
