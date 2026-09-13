@@ -46,7 +46,7 @@ export function createMcpServer(options: ServerOptions = {}): ServerContext {
   registerLibraryTools(server, db);
   registerAnalyticsTools(server, db);
   registerPlaylistTools(server, db, bridge);
-  registerCurationTools(server, db);
+  registerCurationTools(server, db, bridge);
   registerPlaybackTools(server, bridge, db);
 
   return { server, db, bridge };

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
   auditMetadata,
@@ -23,7 +24,11 @@ import { formatMcpResponse } from "../utils/response.ts";
 /**
  * Registers metadata hygiene and curation assistant tools on the MCP server instance.
  */
-export function registerCurationTools(server: McpServer, db: LuminousDatabase): void {
+export function registerCurationTools(
+  server: McpServer,
+  db: LuminousDatabase,
+  bridgeClient?: LuminousBridgeClient
+): void {
   server.tool(
     "audit_metadata",
     "Audit the music library for missing metadata (artwork, lyrics, release year, genre, composer, loudness) with summary counts and paginated track samples.",
@@ -212,6 +217,14 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const results = updateTrackMetadata(handle, updateParams);
 
+        // Emit real-time notification to running desktop player (non-blocking)
+        if (bridgeClient && results.updated_count > 0) {
+          await bridgeClient.notifyEvent("library-changed", {
+            entity: "track",
+            track_ids: results.updated_track_ids,
+          });
+        }
+
         return formatMcpResponse(results);
       } catch (err: any) {
         return {
@@ -355,6 +368,14 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
 
         const result = updateArtistProfile(handle, updateParams);
 
+        // Emit real-time notification to running desktop player (non-blocking)
+        if (bridgeClient && result.success) {
+          await bridgeClient.notifyEvent("library-changed", {
+            entity: "artist",
+            artist: result.artist,
+          });
+        }
+
         return formatMcpResponse(result);
       } catch (err: any) {
         return {
@@ -488,6 +509,14 @@ export function registerCurationTools(server: McpServer, db: LuminousDatabase): 
         };
 
         const result = updateAlbumProfile(handle, updateParams);
+
+        // Emit real-time notification to running desktop player (non-blocking)
+        if (bridgeClient && result.success) {
+          await bridgeClient.notifyEvent("library-changed", {
+            entity: "album",
+            album: result.album,
+          });
+        }
 
         return formatMcpResponse(result);
       } catch (err: any) {
