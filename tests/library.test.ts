@@ -521,6 +521,37 @@ describe("MCP Library Tools Integration", () => {
 
     expect(parsed.count).toBe(1);
     expect(parsed.tracks[0].title).toBe("Midnight City");
+    expect(parsed.tracks[0].composer).toBe("Anthony Gonzalez; Yann Gonzalez");
+    expect(parsed.tracks[0].performer).toBe("Rick Rubin");
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls search_library tool via MCP and strips null fields on tracks", async () => {
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "search_library",
+      arguments: {
+        query: "Resonance",
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.count).toBe(1);
+    expect(parsed.tracks[0].title).toBe("Resonance");
+    expect(parsed.tracks[0].composer).toBe("Randy Goffe");
+    // Performer is null in DB, so it must be stripped
+    expect(parsed.tracks[0].performer).toBeUndefined();
 
     await client.close();
     await server.close();
@@ -549,6 +580,8 @@ describe("MCP Library Tools Integration", () => {
     expect(parsed.metadata.title).toBe("Midnight City");
     expect(parsed.metadata.artist).toBe("M83");
     expect(parsed.technical_specs.file_type).toBe("FLAC");
+    expect(parsed.metadata.comment).toBeUndefined();
+    expect(parsed.identifiers?.musicbrainz_album_id).toBeUndefined();
 
     await client.close();
     await server.close();

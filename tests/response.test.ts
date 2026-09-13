@@ -3,6 +3,7 @@ import {
   formatMcpResponse,
   isPrettyJsonEnabled,
   serializeJson,
+  stripNullAndEmpty,
 } from "../src/utils/response.ts";
 
 describe("Response Serialization Utility", () => {
@@ -77,5 +78,107 @@ describe("Response Serialization Utility", () => {
         },
       ],
     });
+  });
+
+  describe("stripNullAndEmpty", () => {
+    it("removes null, undefined, and empty string fields while preserving 0 and false", () => {
+      const input = {
+        id: 1,
+        title: "Track",
+        composer: null,
+        performer: undefined,
+        comment: "",
+        play_count: 0,
+        has_lyrics: false,
+      };
+
+      const cleaned = stripNullAndEmpty(input);
+
+      expect(cleaned).toEqual({
+        id: 1,
+        title: "Track",
+        play_count: 0,
+        has_lyrics: false,
+      });
+      expect("composer" in (cleaned as any)).toBe(false);
+      expect("performer" in (cleaned as any)).toBe(false);
+      expect("comment" in (cleaned as any)).toBe(false);
+    });
+
+    it("cleans recursively inside nested objects and arrays", () => {
+      const input = {
+        id: 10,
+        tracks: [
+          { id: 1, title: "T1", album_artist: null, bpm: "" },
+          { id: 2, title: "T2", album_artist: "Artist", bpm: 120 },
+        ],
+        details: {
+          release_year: 2020,
+          notes: null,
+          empty_group: {
+            sub1: null,
+            sub2: "",
+          },
+        },
+      };
+
+      const cleaned = stripNullAndEmpty(input);
+
+      expect(cleaned).toEqual({
+        id: 10,
+        tracks: [
+          { id: 1, title: "T1" },
+          { id: 2, title: "T2", album_artist: "Artist", bpm: 120 },
+        ],
+        details: {
+          release_year: 2020,
+        },
+      });
+    });
+
+    it("preserves empty arrays by default", () => {
+      const input = {
+        results: [],
+        count: 0,
+      };
+
+      const cleaned = stripNullAndEmpty(input);
+      expect(cleaned).toEqual({
+        results: [],
+        count: 0,
+      });
+    });
+
+    it("supports disabling null stripping via options", () => {
+      const input = {
+        id: 1,
+        composer: null,
+      };
+
+      const cleaned = stripNullAndEmpty(input, { stripNull: false });
+      expect(cleaned).toEqual({
+        id: 1,
+        composer: null,
+      });
+    });
+  });
+
+  it("formatMcpResponse automatically applies stripNullAndEmpty", () => {
+    const input = {
+      id: 42,
+      artist: "Test",
+      composer: null,
+      bpm: null,
+    };
+
+    const response = formatMcpResponse(input);
+    const parsed = JSON.parse(response.content[0].text);
+
+    expect(parsed).toEqual({
+      id: 42,
+      artist: "Test",
+    });
+    expect(parsed.composer).toBeUndefined();
+    expect(parsed.bpm).toBeUndefined();
   });
 });

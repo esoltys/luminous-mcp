@@ -646,6 +646,7 @@ describe("MCP Analytics Tools Integration", () => {
     expect(parsed.count).toBe(2);
     expect(parsed.history[0].track.title).toBe("Midnight City");
     expect(parsed.history[0].context.playlist_name).toBe("Night Drives");
+    expect(parsed.history[0].track.composer).toBeUndefined();
 
     await client.close();
     await server.close();
