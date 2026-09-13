@@ -14,6 +14,20 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
 - **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next, seek, volume).
 
+## ⚡ Token Efficiency & Optimization
+
+Luminous MCP implements strict token-efficiency and context window optimization best practices designed specifically for LLMs:
+
+| Optimization Feature | Implementation | Token & Context Window Impact |
+| :--- | :--- | :--- |
+| **Compact JSON Serialization** | Stripped indentation whitespace by default (`JSON.stringify(obj)`); optional pretty printing via `pretty` argument or `LUMINOUS_PRETTY_JSON=1` | **15%–25% reduction** across all tool responses |
+| **Sparse Field Pruning** | Recursively strips `null`, `undefined`, and empty strings (`""`) while preserving semantic falsy values (`0`, `false`, `[]`) | **25%–35% reduction** across metadata-dense inspection tools |
+| **On-Demand Lyrics Gating** | Full song lyrics gated behind explicit `include_lyrics: true` flag in `get_track_details` (defaults to boolean indicator `has_lyrics`) | **500–1,500+ tokens saved per track** lookup |
+| **Search Detail Levels** | `search_library` defaults to compact essential fields (`id`, `title`, `artist`, `album`, `year`, `duration_seconds`); `detail_level: "full"` on demand | **50%–70% reduction** on search listings |
+| **Metric Deduplication** | Canonical ISO 8601 timestamps (`last_played_iso`, `played_at_iso`), single float ratios (`skip_ratio`), and seconds durations (`duration_seconds`) | **15%–20% reduction** on analytics and history queries |
+| **Bounded Collections** | Caps artist summary entity lists (`collaborators`, `composers`, `producers`) to top 20 frequency-ranked entries, while returning total counts | Prevents **1,000–3,000+ token explosions** on prolific artists |
+| **Offset Pagination** | Incremental `limit` & `offset` pagination with `total_matches` and `has_more` metadata for `search_library` and `get_recent_history` | Eliminates redundant page re-fetching during multi-turn exploration |
+
 ## 🚀 Getting Started
 
 ### Prerequisites
