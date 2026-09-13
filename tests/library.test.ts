@@ -390,6 +390,26 @@ describe("Library Database Functions", () => {
       const res = searchLibrary(db, { limit: 2 });
       expect(res.count).toBe(2);
       expect(res.tracks.length).toBe(2);
+      expect(res.limit).toBe(2);
+      expect(res.offset).toBe(0);
+      expect(res.total_matches).toBe(4);
+      expect(res.has_more).toBe(true);
+    });
+
+    it("respects offset pagination", () => {
+      const page1 = searchLibrary(db, { limit: 2, offset: 0 });
+      const page2 = searchLibrary(db, { limit: 2, offset: 2 });
+
+      expect(page1.count).toBe(2);
+      expect(page2.count).toBe(2);
+      expect(page1.has_more).toBe(true);
+      expect(page2.has_more).toBe(false);
+
+      const page1Ids = page1.tracks.map((t) => t.id);
+      const page2Ids = page2.tracks.map((t) => t.id);
+      for (const id of page2Ids) {
+        expect(page1Ids).not.toContain(id);
+      }
     });
 
     it("returns compact track items by default", () => {
@@ -577,6 +597,10 @@ describe("MCP Library Tools Integration", () => {
     const parsed = JSON.parse(firstContent.text);
 
     expect(parsed.count).toBe(1);
+    expect(parsed.total_matches).toBe(1);
+    expect(parsed.offset).toBe(0);
+    expect(parsed.limit).toBe(25);
+    expect(parsed.has_more).toBe(false);
     expect(parsed.tracks[0].title).toBe("Midnight City");
     expect(parsed.tracks[0].artist).toBe("M83");
     expect(parsed.tracks[0].composer).toBeUndefined();

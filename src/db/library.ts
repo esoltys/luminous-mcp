@@ -38,6 +38,7 @@ export interface SearchLibraryParams {
   lufs_min?: number;
   lufs_max?: number;
   limit?: number;
+  offset?: number;
   detail_level?: DetailLevel;
 }
 
@@ -63,6 +64,10 @@ export interface SearchLibraryTrackItem {
 
 export interface SearchLibraryResult {
   count: number;
+  total_matches?: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
   tracks: SearchLibraryTrackItem[];
 }
 
@@ -212,9 +217,11 @@ function hasTable(db: Database, tableName: string): boolean {
  */
 export function searchLibrary(db: Database, params: SearchLibraryParams = {}): SearchLibraryResult {
   const limit = Math.max(1, Math.min(100, params.limit ?? 25));
+  const offset = Math.max(0, params.offset ?? 0);
   const whereClauses: string[] = ["s.unavailable = 0"];
   const queryParams: Record<string, unknown> = {
     $limit: limit,
+    $offset: offset,
   };
 
   const ftsTableAvailable = hasTable(db, "songs_fts");
@@ -293,6 +300,12 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
     whereClauses.push("s.ebur128_integrated_loudness_lufs <= $lufsMax");
   }
 
+  const countSql = `
+    SELECT COUNT(*) as total
+    FROM songs s
+    WHERE ${whereClauses.join(" AND ")};
+  `;
+
   const sql = `
     SELECT
       s.id,
@@ -313,11 +326,14 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
     FROM songs s
     WHERE ${whereClauses.join(" AND ")}
     ORDER BY COALESCE(s.album_artist_sort, s.album_artist, s.artist), COALESCE(s.albumsort, s.album), s.disc, s.track
-    LIMIT $limit;
+    LIMIT $limit OFFSET $offset;
   `;
 
   let rows: any[] = [];
+  let totalMatches = 0;
   try {
+    const countRow = db.query<{ total: number }, any>(countSql).get(queryParams as any);
+    totalMatches = countRow?.total ?? 0;
     rows = db.query(sql).all(queryParams as any);
   } catch {
     // If FTS5 failed (e.g. malformed syntax), retry with pure LIKE matching
@@ -329,6 +345,11 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
         }
         return clause;
       });
+      const fallbackCountSql = `
+        SELECT COUNT(*) as total
+        FROM songs s
+        WHERE ${fallbackWhere.join(" AND ")};
+      `;
       const fallbackSql = `
         SELECT
           s.id,
@@ -349,11 +370,19 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
         FROM songs s
         WHERE ${fallbackWhere.join(" AND ")}
         ORDER BY COALESCE(s.album_artist_sort, s.album_artist, s.artist), COALESCE(s.albumsort, s.album), s.disc, s.track
-        LIMIT $limit;
+        LIMIT $limit OFFSET $offset;
       `;
-      rows = db.query(fallbackSql).all(queryParams as any);
+      try {
+        const fallbackCountRow = db.query<{ total: number }, any>(fallbackCountSql).get(queryParams as any);
+        totalMatches = fallbackCountRow?.total ?? 0;
+        rows = db.query(fallbackSql).all(queryParams as any);
+      } catch {
+        rows = [];
+        totalMatches = 0;
+      }
     } else {
       rows = [];
+      totalMatches = 0;
     }
   }
 
@@ -398,6 +427,10 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
 
   return {
     count: tracks.length,
+    total_matches: totalMatches,
+    offset,
+    limit,
+    has_more: offset + tracks.length < totalMatches,
     tracks,
   };
 }
