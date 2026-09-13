@@ -6,7 +6,7 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 
 ![screenshot-02](./docs/screenshot-02.jpg)
 
-## ✨ Features
+## Features
 
 - **Library Search & Filtering**: Search tracks, albums, artists, genres, composers, and lyrics using SQLite FTS5. Filter by BPM, LUFS loudness, dynamic range, and bit depth.
 - **Listening Analytics**: Inspect play counts, skip rates, top tracks/artists, and forgotten favorites.
@@ -14,7 +14,7 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
 - **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next, seek, volume).
 
-## ⚡ Token Efficiency & Optimization
+## Token Efficiency & Optimization
 
 Luminous MCP implements strict token-efficiency and context window optimization best practices designed specifically for LLMs:
 
@@ -28,7 +28,7 @@ Luminous MCP implements strict token-efficiency and context window optimization 
 | **Bounded Collections** | Caps artist summary entity lists (`collaborators`, `composers`, `producers`) to top 20 frequency-ranked entries, while returning total counts | Prevents **1,000–3,000+ token explosions** on prolific artists |
 | **Offset Pagination** | Incremental `limit` & `offset` pagination with `total_matches` and `has_more` metadata for `search_library` and `get_recent_history` | Eliminates redundant page re-fetching during multi-turn exploration |
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -76,12 +76,12 @@ Alternatively, add `luminous` to your `claude_desktop_config.json` or MCP client
 }
 ```
 
-## 🛠️ Development
+## Development
 
 - **Typecheck**: `bun run typecheck`
 - **Tests**: `bun test`
 - **Build**: `bun run build`
 
-## 📄 License
+## License
 
 MIT © Eric James Soltys
