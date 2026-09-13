@@ -7,6 +7,7 @@ import {
   searchLibrary,
   type SearchLibraryParams,
 } from "../db/library.ts";
+import { formatMcpResponse } from "../utils/response.ts";
 
 /**
  * Registers music library inspection and search tools on the MCP server instance.
@@ -79,14 +80,7 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
 
         const results = searchLibrary(handle, searchParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -139,14 +133,7 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
           };
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(details, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(details);
       } catch (err: any) {
         return {
           isError: true,
@@ -184,14 +171,7 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         const handle = db.getHandle();
         const summary = getArtistSummary(handle, params.artist);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(summary, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(summary);
       } catch (err: any) {
         return {
           isError: true,

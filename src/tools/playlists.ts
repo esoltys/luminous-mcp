@@ -7,6 +7,7 @@ import {
   getPlaylistTracks,
   listPlaylists,
 } from "../db/playlists.ts";
+import { formatMcpResponse } from "../utils/response.ts";
 
 /**
  * Registers playlist management tools on the MCP server instance.
@@ -46,14 +47,7 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           include_dynamic: params.include_dynamic,
         });
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -131,14 +125,7 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           offset: params.offset,
         });
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -186,14 +173,7 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           track_ids: params.track_ids,
         });
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,
@@ -259,14 +239,7 @@ export function registerPlaylistTools(server: McpServer, db: LuminousDatabase): 
           track_ids: params.track_ids,
         });
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(results);
       } catch (err: any) {
         return {
           isError: true,

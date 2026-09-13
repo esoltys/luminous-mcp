@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SERVER_NAME, SERVER_VERSION } from "../constants.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
+import { formatMcpResponse } from "../utils/response.ts";
 
 /**
  * Registers core diagnostic and system tools on the MCP server instance.
@@ -20,14 +21,7 @@ export function registerSystemTools(server: McpServer, db: LuminousDatabase): vo
         },
       };
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(response, null, 2),
-          },
-        ],
-      };
+      return formatMcpResponse(response);
     }
   );
 
@@ -59,14 +53,7 @@ export function registerSystemTools(server: McpServer, db: LuminousDatabase): vo
         },
       };
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(response, null, 2),
-          },
-        ],
-      };
+      return formatMcpResponse(response);
     }
   );
 }

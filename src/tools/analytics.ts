@@ -7,6 +7,7 @@ import {
   type ListeningStatsParams,
   type RecentHistoryParams,
 } from "../db/analytics.ts";
+import { formatMcpResponse } from "../utils/response.ts";
 
 /**
  * Registers listening analytics, history, and library insights tools on the MCP server.
@@ -99,14 +100,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
 
         const result = getListeningStats(handle, statsParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(result);
       } catch (err: any) {
         return {
           isError: true,
@@ -197,14 +191,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
 
         const result = getRecentHistory(handle, historyParams);
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        return formatMcpResponse(result);
       } catch (err: any) {
         return {
           isError: true,
