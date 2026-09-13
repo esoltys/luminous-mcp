@@ -206,6 +206,7 @@ export function registerPlaybackTools(
     artist?: string;
     scheduledAt: number;
     duration: number;
+    stopAt: "next_track_start" | "current_track_end";
     abortController: AbortController;
   }
 
@@ -222,16 +223,22 @@ export function registerPlaybackTools(
 
   server.tool(
     "pause_after_track",
-    "Pause playback in Luminous Music Player cleanly at the end of the currently playing track without cutting into the next track. Supports action='schedule' (default) to schedule a pause, 'cancel' to cancel a pending pause, or 'status' to check if a pause is currently scheduled.",
+    "Pause or stop playback in Luminous Music Player cleanly when the current track finishes. Handles user requests like 'stop after this track', 'pause after this song', 'stop playback when this song ends', and 'stop at the beginning of the next track'. Supports action='schedule' (default) to schedule a pause, 'cancel' to cancel a pending pause, or 'status' to check if a pause is currently scheduled.",
     {
       action: z
         .enum(["schedule", "cancel", "status"])
         .default("schedule")
         .optional()
         .describe("Action to perform: 'schedule' (default) to pause after current track, 'cancel' to cancel a pending pause, or 'status' to check if a pause is scheduled"),
+      stop_at: z
+        .enum(["next_track_start", "current_track_end"])
+        .default("next_track_start")
+        .optional()
+        .describe("Where to pause playback: 'next_track_start' (default, current song completes and next track is primed at 0:00 paused) or 'current_track_end' (pauses right at the end of the current song before advancing to the next track)"),
     },
     async (params) => {
       const action = params.action ?? "schedule";
+      const stopAt = params.stop_at ?? "next_track_start";
 
       if (action === "cancel") {
         const wasCancelled = cancelWatcher();
@@ -254,6 +261,7 @@ export function registerPlaybackTools(
               artist: activeWatcher.artist,
               duration_seconds: activeWatcher.duration,
             },
+            stop_at: activeWatcher.stopAt,
             scheduled_at: activeWatcher.scheduledAt,
           });
         }
@@ -289,6 +297,7 @@ export function registerPlaybackTools(
           artist,
           scheduledAt: Date.now(),
           duration,
+          stopAt,
           abortController,
         };
         activeWatcher = watcher;
@@ -311,22 +320,25 @@ export function registerPlaybackTools(
                 break;
               }
 
-              // Track transitioned to next track
-              if (curState.current_track?.id !== trackId) {
-                await bridgeClient.controlPlayback({ action: "pause" }).catch(() => {});
-                await bridgeClient.controlPlayback({ action: "seek", position_seconds: 0 }).catch(() => {});
-                break;
-              }
-
               const curDuration = curState.duration_seconds || duration;
               const timeLeft = curDuration - curState.position_seconds;
 
-              // Reached near end of track (within 0.25s)
-              if (timeLeft <= 0.25) {
+              // If configured to stop at current track end, pause before advancing
+              if (stopAt === "current_track_end" && timeLeft <= 0.3) {
                 await bridgeClient.controlPlayback({ action: "pause" }).catch(() => {});
                 break;
               }
 
+              // Track transitioned to next track
+              if (curState.current_track?.id !== trackId) {
+                await bridgeClient.controlPlayback({ action: "pause" }).catch(() => {});
+                if (stopAt === "next_track_start") {
+                  await bridgeClient.controlPlayback({ action: "seek", position_seconds: 0 }).catch(() => {});
+                }
+                break;
+              }
+
+              // Tight poll interval when near completion
               const pollInterval = timeLeft <= 3 ? 100 : 1000;
               await new Promise((resolve) => {
                 const timer = setTimeout(resolve, pollInterval);
@@ -350,11 +362,15 @@ export function registerPlaybackTools(
         const mins = Math.floor(remaining / 60);
         const secs = Math.floor(remaining % 60);
         const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        const positionNote = stopAt === "current_track_end"
+          ? "at the end of the song"
+          : "at the start of the next track";
 
         return formatMcpResponse({
           success: true,
           action: "scheduled",
-          message: `Playback will pause automatically when "${trackTitle}" finishes (~${timeStr} remaining).`,
+          stop_at: stopAt,
+          message: `Playback will pause automatically when "${trackTitle}" finishes (${positionNote}, ~${timeStr} remaining).`,
           track: {
             id: trackId,
             title: trackTitle,

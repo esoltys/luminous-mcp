@@ -134,7 +134,7 @@ try {
       },
       {
         name: "pause_after_track",
-        description: "Pause playback cleanly at the end of the currently playing track without cutting into next song",
+        description: "Pause or stop playback cleanly when current track finishes (at next track start or current track end)",
       },
     ],
     keywords: ["music", "audio", "luminous", "library", "player", "metadata"],
