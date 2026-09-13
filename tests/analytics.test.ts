@@ -513,11 +513,30 @@ describe("Listening Analytics & Insights Database Layer", () => {
     it("returns chronological playback rows with timestamps and context", () => {
       const res = getRecentHistory(db, { limit: 10 });
       expect(res.count).toBe(4);
+      expect(res.total_matches).toBe(4);
+      expect(res.offset).toBe(0);
+      expect(res.limit).toBe(10);
+      expect(res.has_more).toBe(false);
       expect(res.history[0].track.title).toBe("Midnight City");
       expect(res.history[0].context.type).toBe("playlist");
       expect(res.history[0].context.playlist_name).toBe("Night Drives");
       expect(res.history[0].duration_seconds).toBe(244);
       expect(res.history[0].played_at_iso).toBeDefined();
+    });
+
+    it("supports offset pagination", () => {
+      const page1 = getRecentHistory(db, { limit: 2, offset: 0 });
+      const page2 = getRecentHistory(db, { limit: 2, offset: 2 });
+
+      expect(page1.count).toBe(2);
+      expect(page1.total_matches).toBe(4);
+      expect(page1.has_more).toBe(true);
+
+      expect(page2.count).toBe(2);
+      expect(page2.total_matches).toBe(4);
+      expect(page2.has_more).toBe(false);
+
+      expect(page1.history[0].history_id).not.toBe(page2.history[0].history_id);
     });
 
     it("filters history by time window (since / until)", () => {
@@ -645,6 +664,10 @@ describe("MCP Analytics Tools Integration", () => {
     const parsed = JSON.parse(content.text);
 
     expect(parsed.count).toBe(2);
+    expect(parsed.total_matches).toBe(2);
+    expect(parsed.offset).toBe(0);
+    expect(parsed.limit).toBe(5);
+    expect(parsed.has_more).toBe(false);
     expect(parsed.history[0].track.title).toBe("Midnight City");
     expect(parsed.history[0].context.playlist_name).toBe("Night Drives");
     expect(parsed.history[0].track.composer).toBeUndefined();

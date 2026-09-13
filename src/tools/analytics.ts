@@ -127,6 +127,13 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
         .default(25)
         .optional()
         .describe("Maximum history entries to return (default 25, max 100)"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .optional()
+        .describe("Number of history entries to skip for pagination (default 0)"),
       since: z
         .string()
         .optional()
@@ -180,6 +187,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
         const handle = db.getHandle();
         const historyParams: RecentHistoryParams = {
           limit: params.limit,
+          offset: params.offset,
           since: params.since,
           until: params.until,
           context_type: params.context_type,

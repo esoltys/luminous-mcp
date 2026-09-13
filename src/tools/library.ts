@@ -47,6 +47,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .default(25)
         .optional()
         .describe("Maximum results to return (default 25, max 100)"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .optional()
+        .describe("Number of matching tracks to skip for pagination (default 0)"),
       detail_level: z
         .enum(["compact", "full"])
         .default("compact")
@@ -83,6 +90,7 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
           lufs_min: params.lufs_min,
           lufs_max: params.lufs_max,
           limit: params.limit,
+          offset: params.offset,
           detail_level: params.detail_level,
         };
 

@@ -87,6 +87,7 @@ export type ListeningStatsResult =
 
 export interface RecentHistoryParams {
   limit?: number;
+  offset?: number;
   since?: string | number;
   until?: string | number;
   context_type?: string;
@@ -117,6 +118,10 @@ export interface PlayHistoryItem {
 
 export interface RecentHistoryResult {
   count: number;
+  total_matches?: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
   history: PlayHistoryItem[];
   message?: string;
 }
@@ -580,10 +585,12 @@ export function getRecentHistory(
   }
 
   const limit = Math.max(1, Math.min(100, params.limit ?? 25));
+  const offset = Math.max(0, params.offset ?? 0);
   const order = params.order === "asc" ? "ASC" : "DESC";
   const whereClauses: string[] = ["s.unavailable = 0"];
   const bindings: Record<string, unknown> = {
     $limit: limit,
+    $offset: offset,
   };
 
   const sinceTimestamp = parseTimestamp(params.since);
@@ -625,6 +632,14 @@ export function getRecentHistory(
   const playlistJoin = playlistsAvailable ? "LEFT JOIN playlists p ON ph.playlist_id = p.id" : "";
   const playlistSelect = playlistsAvailable ? "p.name AS playlist_name" : "NULL AS playlist_name";
 
+  const countSql = `
+    SELECT COUNT(*) as total
+    FROM play_history ph
+    JOIN songs s ON ph.song_id = s.id
+    ${playlistJoin}
+    WHERE ${whereClauses.join(" AND ")};
+  `;
+
   const sql = `
     SELECT
       ph.id AS history_id,
@@ -645,15 +660,22 @@ export function getRecentHistory(
     ${playlistJoin}
     WHERE ${whereClauses.join(" AND ")}
     ORDER BY ph.played_at ${order}, ph.id ${order}
-    LIMIT $limit;
+    LIMIT $limit OFFSET $offset;
   `;
 
   let rows: any[] = [];
+  let totalMatches = 0;
   try {
+    const countRow = db.query<{ total: number }, any>(countSql).get(bindings);
+    totalMatches = countRow?.total ?? 0;
     rows = db.query<any, any>(sql).all(bindings);
   } catch (err: any) {
     return {
       count: 0,
+      total_matches: 0,
+      offset,
+      limit,
+      has_more: false,
       history: [],
       message: `Failed to query play_history: ${err.message ?? String(err)}`,
     };
@@ -696,6 +718,10 @@ export function getRecentHistory(
 
   return {
     count: history.length,
+    total_matches: totalMatches,
+    offset,
+    limit,
+    has_more: offset + history.length < totalMatches,
     history,
   };
 }
