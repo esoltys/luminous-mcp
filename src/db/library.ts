@@ -376,10 +376,18 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
   };
 }
 
+export interface GetTrackDetailsOptions {
+  include_lyrics?: boolean;
+}
+
 /**
  * Retrieves deep metadata inspection for a single track by its primary key ID.
  */
-export function getTrackDetails(db: Database, trackId: number): TrackDetails | null {
+export function getTrackDetails(
+  db: Database,
+  trackId: number,
+  options?: GetTrackDetailsOptions
+): TrackDetails | null {
   const row = db.query("SELECT * FROM songs WHERE id = ?").get(trackId) as any;
   if (!row) {
     return null;
@@ -390,6 +398,7 @@ export function getTrackDetails(db: Database, trackId: number): TrackDetails | n
   const durationSeconds = lengthNanosec != null ? Math.round((lengthNanosec / 1e9) * 100) / 100 : null;
   const durationMs = lengthNanosec != null ? Math.round(lengthNanosec / 1e6) : null;
 
+  const includeLyrics = options?.include_lyrics ?? false;
   const rawLyrics: string | null = row.lyrics && row.lyrics.trim() !== "" ? row.lyrics : null;
   const isSyncedLyrics = rawLyrics != null ? /^\[\d{2}:\d{2}(?:\.\d{1,3})?\]/m.test(rawLyrics) : false;
 
@@ -446,7 +455,7 @@ export function getTrackDetails(db: Database, trackId: number): TrackDetails | n
     lyrics: {
       has_lyrics: rawLyrics !== null,
       is_synced: isSyncedLyrics,
-      text: rawLyrics,
+      text: includeLyrics ? rawLyrics : null,
     },
     identifiers: {
       musicbrainz_recording_id: row.musicbrainz_recording_id ?? null,
