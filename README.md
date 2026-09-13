@@ -11,7 +11,7 @@ Connects your AI assistants (Claude Desktop, Antigravity, Cursor, Zed, Ollama) t
 - **Library Search & Filtering**: Search tracks, albums, artists, genres, composers, and lyrics using SQLite FTS5. Filter by BPM, LUFS loudness, dynamic range, and bit depth.
 - **Listening Analytics**: Inspect play counts, skip rates, top tracks/artists, and forgotten favorites.
 - **Playlist Management**: Query, generate, and populate static and dynamic playlists.
-- **Metadata Hygiene**: Audit library for missing tags (album art, composer, year, lyrics) and assist in custom genre taxonomy assignment.
+- **Metadata Hygiene & Library Curation**: Audit library for missing tags (album art, composer, year, lyrics), curate artist profiles and album descriptions with markdown source citations, manage external links, and organize custom genre taxonomies.
 - **Playback Control**: Interact with running Luminous instances for transport controls (play, pause, next/prev, seek, volume, shuffle, repeat) and queue replacement.
 - **Real-Time UI State Sync**: Non-blocking loopback notifications automatically signal running desktop instances to update playlist views immediately upon MCP mutations.
 
@@ -49,6 +49,13 @@ Here are prompt examples demonstrating natural language queries you can ask your
 - "Give me an artist summary for Cannons: how many tracks and albums do I own, who are their composers/producers, and what are my top played songs by them?"
 - "Summarize my Danheim catalog: total tracks, albums, and genre distribution."
 - "What albums do I have by Shania Twain, and which of her tracks have I played the most?"
+
+### Album & Artist Curation
+
+- "Look up the album description and reviews for 'Currents' by Tame Impala."
+- "Add an album description for 'Random Access Memories' citing [Pitchfork](https://pitchfork.com/reviews/albums/18044-daft-punk-random-access-memories/) and [Rolling Stone](https://www.rollingstone.com/music/music-album-reviews/random-access-memories-107771/) reviews."
+- "Update the artist profile for Cannons with their official website, Bandcamp, and biographical summary."
+- "What tags and external links are associated with my album 'Hysteria'?"
 
 ### Playlist Creation & Curation
 
