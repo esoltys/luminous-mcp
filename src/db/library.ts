@@ -93,7 +93,6 @@ export interface TrackDetails {
     channels: number | null;
     file_size_bytes: number | null;
     duration_seconds: number | null;
-    duration_ms: number | null;
   };
   acoustic_measurements: {
     loudness_lufs: number | null;
@@ -416,7 +415,6 @@ export function getTrackDetails(
   const fileTypeName = FILE_TYPE_NAMES[row.filetype] ?? "Unknown";
   const lengthNanosec: number | null = row.length_nanosec ?? null;
   const durationSeconds = lengthNanosec != null ? Math.round((lengthNanosec / 1e9) * 100) / 100 : null;
-  const durationMs = lengthNanosec != null ? Math.round(lengthNanosec / 1e6) : null;
 
   const includeLyrics = options?.include_lyrics ?? false;
   const rawLyrics: string | null = row.lyrics && row.lyrics.trim() !== "" ? row.lyrics : null;
@@ -449,7 +447,6 @@ export function getTrackDetails(
       channels: row.channels ?? null,
       file_size_bytes: row.filesize ?? null,
       duration_seconds: durationSeconds,
-      duration_ms: durationMs,
     },
     acoustic_measurements: {
       loudness_lufs:

@@ -44,10 +44,7 @@ export interface TrackStatsItem {
   play_count: number;
   skip_count: number;
   skip_ratio: number;
-  skip_ratio_percent: string;
-  last_played: number | null;
   last_played_iso: string | null;
-  days_since_last_played?: number | null;
 }
 
 export interface LibraryOverviewSummary {
@@ -101,7 +98,6 @@ export interface RecentHistoryParams {
 
 export interface PlayHistoryItem {
   history_id: number;
-  played_at: number;
   played_at_iso: string;
   duration_seconds: number | null;
   context: {
@@ -211,21 +207,18 @@ function buildSongFilterClauses(
 /**
  * Formats a raw database row into a TrackStatsItem.
  */
-function formatTrackStatsRow(r: any, nowSec: number): TrackStatsItem {
+function formatTrackStatsRow(r: any, _nowSec: number): TrackStatsItem {
   const plays = r.playcount ?? 0;
   const skips = r.skipcount ?? 0;
   const total = plays + skips;
   const rawRatio = total > 0 ? skips / total : 0;
   const skipRatio = Math.round(rawRatio * 1000) / 1000;
-  const skipRatioPercent = `${(skipRatio * 100).toFixed(1)}%`;
 
   let lastPlayedIso: string | null = null;
-  let daysSinceLastPlayed: number | null = null;
 
   if (r.lastplayed != null && r.lastplayed > 0) {
     try {
       lastPlayedIso = new Date(r.lastplayed * 1000).toISOString();
-      daysSinceLastPlayed = Math.max(0, Math.floor((nowSec - r.lastplayed) / 86400));
     } catch {
       lastPlayedIso = null;
     }
@@ -241,10 +234,7 @@ function formatTrackStatsRow(r: any, nowSec: number): TrackStatsItem {
     play_count: plays,
     skip_count: skips,
     skip_ratio: skipRatio,
-    skip_ratio_percent: skipRatioPercent,
-    last_played: r.lastplayed ?? null,
     last_played_iso: lastPlayedIso,
-    days_since_last_played: daysSinceLastPlayed,
   };
 }
 
@@ -686,7 +676,6 @@ export function getRecentHistory(
 
     return {
       history_id: r.history_id,
-      played_at: r.played_at,
       played_at_iso: playedAtIso,
       duration_seconds: durationSec,
       context: {
