@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { LuminousBridgeClient } from "../bridge/client.ts";
-import type { PlaybackControlAction } from "../bridge/types.ts";
+import type { PlaybackControlAction, PlaybackState } from "../bridge/types.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import { formatMcpResponse } from "../utils/response.ts";
 
@@ -186,6 +186,183 @@ export function registerPlaybackTools(
         });
 
         return formatMcpResponse(result);
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: err.message ?? String(err),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  interface ActivePauseWatcher {
+    trackId: number;
+    title: string;
+    artist?: string;
+    scheduledAt: number;
+    duration: number;
+    abortController: AbortController;
+  }
+
+  let activeWatcher: ActivePauseWatcher | null = null;
+
+  const cancelWatcher = () => {
+    if (activeWatcher) {
+      activeWatcher.abortController.abort();
+      activeWatcher = null;
+      return true;
+    }
+    return false;
+  };
+
+  server.tool(
+    "pause_after_track",
+    "Pause playback in Luminous Music Player cleanly at the end of the currently playing track without cutting into the next track. Supports action='schedule' (default) to schedule a pause, 'cancel' to cancel a pending pause, or 'status' to check if a pause is currently scheduled.",
+    {
+      action: z
+        .enum(["schedule", "cancel", "status"])
+        .default("schedule")
+        .optional()
+        .describe("Action to perform: 'schedule' (default) to pause after current track, 'cancel' to cancel a pending pause, or 'status' to check if a pause is scheduled"),
+    },
+    async (params) => {
+      const action = params.action ?? "schedule";
+
+      if (action === "cancel") {
+        const wasCancelled = cancelWatcher();
+        return formatMcpResponse({
+          success: true,
+          action: "cancelled",
+          message: wasCancelled
+            ? "Cancelled scheduled pause after track."
+            : "No pause was currently scheduled.",
+        });
+      }
+
+      if (action === "status") {
+        if (activeWatcher) {
+          return formatMcpResponse({
+            scheduled: true,
+            track: {
+              id: activeWatcher.trackId,
+              title: activeWatcher.title,
+              artist: activeWatcher.artist,
+              duration_seconds: activeWatcher.duration,
+            },
+            scheduled_at: activeWatcher.scheduledAt,
+          });
+        }
+        return formatMcpResponse({
+          scheduled: false,
+          message: "No pause is currently scheduled.",
+        });
+      }
+
+      // action === "schedule"
+      try {
+        const state = await bridgeClient.getPlaybackState();
+        if (state.status !== "playing" || !state.current_track) {
+          return formatMcpResponse({
+            success: false,
+            message: `Playback is currently ${state.status}. Cannot schedule a pause when no track is actively playing.`,
+          });
+        }
+
+        const trackId = state.current_track.id;
+        const trackTitle = state.current_track.title;
+        const artist = state.current_track.artist;
+        const duration = state.duration_seconds || state.current_track.duration_seconds || 0;
+        const remaining = Math.max(0, duration - state.position_seconds);
+
+        // Cancel any previous watcher
+        cancelWatcher();
+
+        const abortController = new AbortController();
+        const watcher: ActivePauseWatcher = {
+          trackId,
+          title: trackTitle,
+          artist,
+          scheduledAt: Date.now(),
+          duration,
+          abortController,
+        };
+        activeWatcher = watcher;
+
+        // Background monitor loop
+        (async () => {
+          try {
+            while (!abortController.signal.aborted) {
+              let curState: PlaybackState;
+              try {
+                curState = await bridgeClient.getPlaybackState();
+              } catch {
+                break;
+              }
+
+              if (abortController.signal.aborted) break;
+
+              // Player paused or stopped manually
+              if (curState.status !== "playing") {
+                break;
+              }
+
+              // Track transitioned to next track
+              if (curState.current_track?.id !== trackId) {
+                await bridgeClient.controlPlayback({ action: "pause" }).catch(() => {});
+                await bridgeClient.controlPlayback({ action: "seek", position_seconds: 0 }).catch(() => {});
+                break;
+              }
+
+              const curDuration = curState.duration_seconds || duration;
+              const timeLeft = curDuration - curState.position_seconds;
+
+              // Reached near end of track (within 0.25s)
+              if (timeLeft <= 0.25) {
+                await bridgeClient.controlPlayback({ action: "pause" }).catch(() => {});
+                break;
+              }
+
+              const pollInterval = timeLeft <= 3 ? 100 : 1000;
+              await new Promise((resolve) => {
+                const timer = setTimeout(resolve, pollInterval);
+                abortController.signal.addEventListener(
+                  "abort",
+                  () => {
+                    clearTimeout(timer);
+                    resolve(null);
+                  },
+                  { once: true }
+                );
+              });
+            }
+          } finally {
+            if (activeWatcher === watcher) {
+              activeWatcher = null;
+            }
+          }
+        })();
+
+        const mins = Math.floor(remaining / 60);
+        const secs = Math.floor(remaining % 60);
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+        return formatMcpResponse({
+          success: true,
+          action: "scheduled",
+          message: `Playback will pause automatically when "${trackTitle}" finishes (~${timeStr} remaining).`,
+          track: {
+            id: trackId,
+            title: trackTitle,
+            artist,
+            duration_seconds: duration,
+            remaining_seconds: Math.round(remaining),
+          },
+        });
       } catch (err: any) {
         return {
           isError: true,

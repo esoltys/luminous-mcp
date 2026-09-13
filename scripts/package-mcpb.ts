@@ -120,6 +120,22 @@ try {
         name: "get_recent_history",
         description: "Get chronological playback history from play_history table with timestamps and playback context",
       },
+      {
+        name: "get_playback_state",
+        description: "Get live playback state, current track, position, volume, and transport status",
+      },
+      {
+        name: "control_playback",
+        description: "Control playback transport (play, pause, next, previous, seek, volume, shuffle, repeat)",
+      },
+      {
+        name: "play_tracks",
+        description: "Replace active playback queue with track IDs and immediately begin playback",
+      },
+      {
+        name: "pause_after_track",
+        description: "Pause playback cleanly at the end of the currently playing track without cutting into next song",
+      },
     ],
     keywords: ["music", "audio", "luminous", "library", "player", "metadata"],
     compatibility: {
