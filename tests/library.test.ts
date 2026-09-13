@@ -391,6 +391,33 @@ describe("Library Database Functions", () => {
       expect(res.count).toBe(2);
       expect(res.tracks.length).toBe(2);
     });
+
+    it("returns compact track items by default", () => {
+      const res = searchLibrary(db, { query: "Midnight" });
+      expect(res.count).toBe(1);
+      const track = res.tracks[0];
+      expect(track.title).toBe("Midnight City");
+      expect(track.artist).toBe("M83");
+      expect(track.album).toBe("Hurry Up, We're Dreaming");
+      expect(track.year).toBe(2019);
+      expect(track.duration_seconds).toBe(244);
+      expect(track.composer).toBeUndefined();
+      expect(track.performer).toBeUndefined();
+      expect(track.bpm).toBeUndefined();
+    });
+
+    it("returns full track items when detail_level is full", () => {
+      const res = searchLibrary(db, { query: "Midnight", detail_level: "full" });
+      expect(res.count).toBe(1);
+      const track = res.tracks[0];
+      expect(track.title).toBe("Midnight City");
+      expect(track.composer).toBe("Anthony Gonzalez; Yann Gonzalez");
+      expect(track.performer).toBe("Rick Rubin");
+      expect(track.genre).toBe("Synthwave; Electronic");
+      expect(track.bpm).toBe(125);
+      expect(track.loudness_lufs).toBe(-10.5);
+      expect(track.play_count).toBe(15);
+    });
   });
 
   describe("getTrackDetails", () => {
@@ -532,8 +559,41 @@ describe("MCP Library Tools Integration", () => {
 
     expect(parsed.count).toBe(1);
     expect(parsed.tracks[0].title).toBe("Midnight City");
+    expect(parsed.tracks[0].artist).toBe("M83");
+    expect(parsed.tracks[0].composer).toBeUndefined();
+    expect(parsed.tracks[0].performer).toBeUndefined();
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls search_library tool via MCP with detail_level: full", async () => {
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({
+      name: "search_library",
+      arguments: {
+        query: "synthwave",
+        bpm_min: 110,
+        detail_level: "full",
+      },
+    });
+
+    const firstContent = getTextContent(result);
+    const parsed = JSON.parse(firstContent.text);
+
+    expect(parsed.count).toBe(1);
+    expect(parsed.tracks[0].title).toBe("Midnight City");
     expect(parsed.tracks[0].composer).toBe("Anthony Gonzalez; Yann Gonzalez");
     expect(parsed.tracks[0].performer).toBe("Rick Rubin");
+    expect(parsed.tracks[0].bpm).toBe(125);
+    expect(parsed.tracks[0].play_count).toBe(15);
 
     await client.close();
     await server.close();
@@ -552,6 +612,7 @@ describe("MCP Library Tools Integration", () => {
       name: "search_library",
       arguments: {
         query: "Resonance",
+        detail_level: "full",
       },
     });
 
