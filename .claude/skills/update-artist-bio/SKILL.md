@@ -27,11 +27,24 @@ optional formatting suggestions, they are hard constraints on what gets written 
    This is a curated summary for a music player UI, not a full biography — be concise and
    prioritize the most notable facts (origin, breakout moment, genre/style, major
    accolades/impact).
-5. **Cite sources at the end, in Markdown.** End the bio with a `Sources:` section listing
-   the pages you drew facts from, as Markdown links: `[Source Name](https://...)`. This is
-   separate from the "official links" in rule 3 — a source citation (e.g. Wikipedia, AllMusic,
-   a reputable interview) does not need to be an official artist-controlled link, but it must
-   be a real, checkable reference for the facts stated above it.
+5. **Cite sources at the end, in Markdown — as a distinct trailing section, not an inline
+   citation.** After the bio prose, add a blank line, then a `Sources:` line, then one Markdown
+   link per source on its own line:
+
+   ```
+   <bio prose ends here.>
+
+   Sources:
+   - [Wikipedia](https://en.wikipedia.org/wiki/...)
+   - [AllMusic](https://www.allmusic.com/...)
+   ```
+
+   Do **not** drop a single `[Source](url)` link mid-sentence or at the tail of the last
+   sentence — every source used must be listed in the `Sources:` section, even if there's
+   only one. This is separate from the "official links" in rule 3 — a source citation (e.g.
+   Wikipedia, AllMusic, a reputable interview) does not need to be an official
+   artist-controlled link, but it must be a real, checkable reference for the facts stated
+   above it.
 
 ## Workflow
 
@@ -56,7 +69,8 @@ optional formatting suggestions, they are hard constraints on what gets written 
      `{ platform, handle_or_url }` or a plain URL string — no Twitter/X, no fan sites
    - `tags`: optional curated artist-attribute tags only — nationality (e.g. "Canadian") and
      notable awards/honors (e.g. "Grammy Award", "Brit Award"). Never genre or style tags
-     (tracked elsewhere in the library) and never era/decade-active tags (derivable from the
-     library's own data, not curated)
+     (tracked elsewhere in the library) and never decade/era-active tags such as "80s",
+     "1980s", or "eighties" (derivable from the library's own data, not curated). If you
+     aren't certain a candidate tag is a nationality or a named award, leave it out.
 6. **Confirm** by showing the user the saved bio (or calling `get_artist_profile` again) so
    they can review the result.
