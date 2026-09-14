@@ -536,14 +536,18 @@ export function registerCurationTools(
 
   server.tool(
     "update_album_profile",
-    "Update or create an album's curated profile (description, artist association, official website URL, tags, external source/review/storefront links) in the Luminous database. Descriptions support Markdown links ([Source](url)) to cite references.",
+    "Update or create an album's curated profile (description, artist association, official website URL, tags, external source/review/storefront links) in the Luminous database. " +
+      "Put every citation, review, and storefront/streaming link in the structured `links` array (not inline markdown) - the app renders `links` as its own UI section, and any link only written into `description` as prose is invisible there.",
     {
       album: z.string().min(1).describe("Album title whose profile is being updated"),
       artist: z.string().optional().describe("Associated album artist or primary artist name"),
       description: z
         .string()
         .optional()
-        .describe("Curated album description, liner notes, or critical summary (supports markdown links [Source](url) to cite references)"),
+        .describe(
+          "Curated album description, liner notes, or critical summary - prose only. Do not append a 'Sources:' list or inline markdown links here; " +
+            "put every citation/review/store link in the `links` array instead, so it renders in the app's UI."
+        ),
       website: z.string().optional().describe("Official album landing page, Bandcamp URL, or release website"),
       tags: z.array(z.string()).optional().describe("Curated tags or style descriptors for the album"),
       links: z
@@ -559,7 +563,10 @@ export function registerCurationTools(
           ])
         )
         .optional()
-        .describe("External links, reviews, storefronts, or reference sources"),
+        .describe(
+          "External links, reviews, storefronts, or reference sources - the canonical, app-rendered home for every URL cited for this album. " +
+            "Include every source used to write the description here (category: 'source' or 'review'), plus any storefront/streaming links (category: 'store')."
+        ),
     },
     async (params) => {
       if (!db.exists()) {
