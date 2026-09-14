@@ -914,6 +914,72 @@ export function getArtistProfile(
   };
 }
 
+const TWITTER_X_URL_RE = /(?:https?:\/\/)?(?:www\.|mobile\.)?(?:twitter\.com|x\.com)\b/i;
+
+function socialLinkText(link: { platform?: string; handle_or_url?: string } | string): string {
+  if (typeof link === "string") return link;
+  return [link.platform, link.handle_or_url].filter(Boolean).join(" ");
+}
+
+function isTwitterOrXPlatform(platform: string | undefined): boolean {
+  if (!platform) return false;
+  const normalized = platform.trim().toLowerCase();
+  return normalized === "twitter" || normalized === "x" || normalized === "x (twitter)" || normalized === "twitter/x";
+}
+
+/**
+ * Throws if the bio, website, or social/external links contain a Twitter/X URL
+ * or an explicit Twitter/X platform entry. Curated artist profiles link out to
+ * official/verified sources only, and Twitter/X is excluded by policy.
+ */
+function assertNoTwitterOrXLinks(
+  bio: string | null | undefined,
+  website: string | null | undefined,
+  socialLinks: Array<{ platform?: string; handle_or_url?: string } | string> | undefined
+): void {
+  const offenders: string[] = [];
+
+  if (bio && TWITTER_X_URL_RE.test(bio)) offenders.push("bio");
+  if (website && TWITTER_X_URL_RE.test(website)) offenders.push("website");
+  if (socialLinks) {
+    const hasTwitterLink = socialLinks.some(
+      (link) =>
+        TWITTER_X_URL_RE.test(socialLinkText(link)) ||
+        isTwitterOrXPlatform(typeof link === "object" ? link.platform : undefined)
+    );
+    if (hasTwitterLink) offenders.push("social_links/links");
+  }
+
+  if (offenders.length > 0) {
+    throw new Error(
+      `Twitter/X links are not allowed in artist profiles (found in: ${offenders.join(", ")}). Remove any twitter.com/x.com URLs or "Twitter"/"X" platform entries.`
+    );
+  }
+}
+
+const DECADE_NUMERIC_TAG_RE = /^\d{1,3}0s$/;
+const DECADE_WORD_TAG_RE =
+  /^(twenties|thirties|forties|fifties|sixties|seventies|eighties|nineties)$/;
+
+function isDecadeTag(tag: string): boolean {
+  const normalized = tag.trim().toLowerCase().replace(/^[‘’']/, "");
+  return DECADE_NUMERIC_TAG_RE.test(normalized) || DECADE_WORD_TAG_RE.test(normalized);
+}
+
+/**
+ * Throws if any tag is a decade/era-active tag (e.g. "80s", "1980s", "eighties").
+ * Era active is derivable from the library's own release data, not a curated fact.
+ */
+function assertNoDecadeTags(tags: string[] | undefined): void {
+  if (!tags) return;
+  const badTags = tags.filter(isDecadeTag);
+  if (badTags.length > 0) {
+    throw new Error(
+      `Decade/era tags are not allowed in artist profiles (found: ${badTags.join(", ")}). Era active can be derived from library data; use only nationality or named-award tags.`
+    );
+  }
+}
+
 /**
  * Creates or updates an artist's profile (bio, website, tags, social links)
  * in the Luminous database.
@@ -939,6 +1005,9 @@ export function updateArtistProfile(
       "At least one profile field (bio, website, tags, social_links) must be provided."
     );
   }
+
+  assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
+  assertNoDecadeTags(params.tags);
 
   // Ensure table exists
   db.run(`
