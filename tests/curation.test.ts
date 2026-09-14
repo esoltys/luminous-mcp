@@ -10,6 +10,7 @@ import { LuminousBridgeClient } from "../src/bridge/client.ts";
 import {
   auditMetadata,
   extractBioLinks,
+  findArtistsByTag,
   getAlbumProfile,
   getArtistProfile,
   getGenreHierarchy,
@@ -601,6 +602,67 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
     });
   });
 
+  describe("findArtistsByTag", () => {
+    it("finds artists whose tags include the given tag (case-insensitive)", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      updateArtistProfile(db, { artist: "Folk Artist", tags: ["Canadian", "folk"] });
+      updateArtistProfile(db, { artist: "Mystery Artist", tags: ["canadian"] });
+
+      const result = findArtistsByTag(db, { tag: "Canadian" });
+
+      expect(result.tag).toBe("Canadian");
+      expect(result.artists.map((a) => a.artist).sort()).toEqual(["Folk Artist", "Mystery Artist"]);
+      expect(result.pagination.total_matching).toBe(2);
+      expect(result.pagination.has_more).toBe(false);
+
+      db.close();
+    });
+
+    it("returns no matches for a tag no artist has", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const result = findArtistsByTag(db, { tag: "Icelandic" });
+
+      expect(result.artists).toEqual([]);
+      expect(result.pagination.total_matching).toBe(0);
+
+      db.close();
+    });
+
+    it("does not partial-match substrings of a tag", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      updateArtistProfile(db, { artist: "Folk Artist", tags: ["Canadiana"] });
+
+      const result = findArtistsByTag(db, { tag: "Canadian" });
+
+      expect(result.artists).toEqual([]);
+
+      db.close();
+    });
+
+    it("throws when tag is empty", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => findArtistsByTag(db, { tag: "" })).toThrow();
+
+      db.close();
+    });
+
+    it("returns empty result when artist_profiles table does not exist", () => {
+      const db = new Database(tempDbPath);
+      db.run(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY);`);
+
+      const result = findArtistsByTag(db, { tag: "Canadian" });
+
+      expect(result.artists).toEqual([]);
+      expect(result.pagination.total_matching).toBe(0);
+
+      db.close();
+    });
+  });
+
   describe("updateArtistProfile", () => {
     it("creates a new artist profile when none exists", () => {
       const db = setupCurationTestDb(tempDbPath);
@@ -994,7 +1056,35 @@ describe("MCP Curation Tools Integration", () => {
     expect(toolNames).toContain("update_track_metadata");
     expect(toolNames).toContain("get_artist_profile");
     expect(toolNames).toContain("update_artist_profile");
+    expect(toolNames).toContain("find_artists_by_tag");
     expect(toolNames).toContain("lookup_musicbrainz");
+
+    await client.close();
+    await server.close();
+    db.close();
+  });
+
+  it("calls find_artists_by_tag tool via MCP", async () => {
+    setupCurationTestDb(tempDbPath);
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    updateArtistProfile(db.getHandle(), { artist: "Clean Artist", tags: ["progressive metal", "ambient", "Canadian"] });
+
+    const result = await client.callTool({
+      name: "find_artists_by_tag",
+      arguments: { tag: "Canadian" },
+    });
+
+    const text = getTextContent(result);
+    const parsed = JSON.parse(text.text);
+
+    expect(parsed.tag).toBe("Canadian");
+    expect(parsed.artists).toEqual([{ artist: "Clean Artist", tags: ["progressive metal", "ambient", "Canadian"] }]);
 
     await client.close();
     await server.close();
