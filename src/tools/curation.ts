@@ -308,15 +308,27 @@ export function registerCurationTools(
 
   server.tool(
     "update_artist_profile",
-    "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. Biographies support Markdown links ([Source](url)) to cite references.",
+    "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
+      "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
+      "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
+      "tags/links rules below.",
     {
       artist: z.string().min(1).describe("Artist name whose profile is being updated"),
       bio: z
         .string()
         .optional()
-        .describe("Biographical notes or summary for the artist (supports markdown links [Source](url) to cite references)"),
+        .describe(
+          "Biographical summary (~150-300 words). No track lists or discography enumeration. No Twitter/X links. " +
+            "Must end with a trailing 'Sources:' section listing every source used as a Markdown link on its own line, e.g.:\n\nSources:\n- [Wikipedia](https://...)\n- [AllMusic](https://...)"
+        ),
       website: z.string().optional().describe("Official website URL for the artist"),
-      tags: z.array(z.string()).optional().describe("Curated tags or style labels for the artist"),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Curated artist-attribute tags only, e.g. nationality ('Canadian') and named awards/honors ('Grammy Award'). " +
+            "Never genre/style tags and never decade/era tags ('80s') - those are tracked or derivable elsewhere."
+        ),
       social_links: z
         .array(
           z.union([
@@ -328,7 +340,9 @@ export function registerCurationTools(
           ])
         )
         .optional()
-        .describe("Social media profile URLs or platform handles"),
+        .describe(
+          "Official social media profile URLs or handles only (artist/label-controlled). No Twitter/X. No fan sites, unofficial wikis, or forums."
+        ),
       links: z
         .array(
           z.union([
@@ -340,7 +354,9 @@ export function registerCurationTools(
           ])
         )
         .optional()
-        .describe("External links, sources, or reference URLs (alias for social_links)"),
+        .describe(
+          "External links (alias for social_links) - official artist/label-controlled links only. No Twitter/X, fan sites, unofficial wikis, or forums."
+        ),
     },
     async (params) => {
       if (!db.exists()) {

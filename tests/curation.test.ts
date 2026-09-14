@@ -610,7 +610,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
         website: "https://newartist.example.com",
         bio: "Bio for new artist",
         tags: ["indie", "electronic"],
-        social_links: [{ platform: "twitter", handle_or_url: "@newartist" }],
+        social_links: [{ platform: "instagram", handle_or_url: "@newartist" }],
       });
 
       expect(result.success).toBe(true);
@@ -654,6 +654,98 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       expect(() => {
         updateArtistProfile(db, { artist: "Some Artist" });
       }).toThrow("At least one profile field");
+
+      db.close();
+    });
+
+    it("rejects a Twitter/X URL in the bio", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          bio: "Follow updates at https://twitter.com/someartist.",
+        });
+      }).toThrow("Twitter/X links are not allowed");
+
+      db.close();
+    });
+
+    it("rejects an x.com URL in the website field", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          website: "https://x.com/someartist",
+        });
+      }).toThrow("Twitter/X links are not allowed");
+
+      db.close();
+    });
+
+    it("rejects a social_links entry pointing to Twitter/X", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          social_links: [{ platform: "Twitter", handle_or_url: "@someartist" }],
+        });
+      }).toThrow("Twitter/X links are not allowed");
+
+      db.close();
+    });
+
+    it("rejects a bare Twitter URL string in links", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          links: ["https://twitter.com/someartist"],
+        });
+      }).toThrow("Twitter/X links are not allowed");
+
+      db.close();
+    });
+
+    it("rejects numeric decade tags like '80s'", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          tags: ["Canadian", "80s"],
+        });
+      }).toThrow("Decade/era tags are not allowed");
+
+      db.close();
+    });
+
+    it("rejects word-form decade tags like 'eighties'", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      expect(() => {
+        updateArtistProfile(db, {
+          artist: "Some Artist",
+          tags: ["Eighties"],
+        });
+      }).toThrow("Decade/era tags are not allowed");
+
+      db.close();
+    });
+
+    it("allows nationality and award tags", () => {
+      const db = setupCurationTestDb(tempDbPath);
+
+      const result = updateArtistProfile(db, {
+        artist: "Some Artist",
+        tags: ["Canadian", "Grammy Award"],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.profile.tags).toEqual(["Canadian", "Grammy Award"]);
 
       db.close();
     });
