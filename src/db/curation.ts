@@ -1019,6 +1019,12 @@ export function updateArtistProfile(
       bio TEXT
     );
   `);
+  if (!hasColumn(db, "artist_profiles", "tags")) {
+    db.run(`ALTER TABLE artist_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
+  }
+  if (!hasColumn(db, "artist_profiles", "social_links")) {
+    db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
+  }
 
   // Check existing row
   const existing = db
@@ -1250,6 +1256,12 @@ export function updateAlbumProfile(
       links TEXT NOT NULL DEFAULT '[]'
     );
   `);
+  if (!hasColumn(db, "album_profiles", "tags")) {
+    db.run(`ALTER TABLE album_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
+  }
+  if (!hasColumn(db, "album_profiles", "links")) {
+    db.run(`ALTER TABLE album_profiles ADD COLUMN links TEXT NOT NULL DEFAULT '[]';`);
+  }
 
   // Check existing row
   const existing = db
