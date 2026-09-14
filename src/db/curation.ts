@@ -1308,6 +1308,91 @@ export function updateAlbumProfile(
   };
 }
 
+export interface FindArtistsByTagOptions {
+  tag: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ArtistTagMatch {
+  artist: string;
+  tags: string[];
+}
+
+export interface FindArtistsByTagResult {
+  tag: string;
+  artists: ArtistTagMatch[];
+  pagination: {
+    total_matching: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+  };
+}
+
+/**
+ * Finds all curated artist profiles whose tags include the given tag
+ * (case-insensitive exact match, e.g. "Canadian").
+ */
+export function findArtistsByTag(
+  db: Database,
+  options: FindArtistsByTagOptions
+): FindArtistsByTagResult {
+  const tag = options.tag?.trim();
+  if (!tag) {
+    throw new Error("tag must not be empty.");
+  }
+
+  const limit = Math.max(1, Math.min(500, options.limit ?? 100));
+  const offset = Math.max(0, options.offset ?? 0);
+
+  if (!hasTable(db, "artist_profiles")) {
+    return {
+      tag,
+      artists: [],
+      pagination: { total_matching: 0, offset, limit, has_more: false },
+    };
+  }
+
+  const tagLower = tag.toLowerCase();
+
+  interface RawRow {
+    artist_key: string;
+    tags: string;
+  }
+
+  const rows = db
+    .query<RawRow, []>("SELECT artist_key, tags FROM artist_profiles ORDER BY artist_key ASC")
+    .all();
+
+  const matches: ArtistTagMatch[] = [];
+  for (const row of rows) {
+    let parsedTags: string[] = [];
+    try {
+      parsedTags = JSON.parse(row.tags);
+    } catch {
+      parsedTags = [];
+    }
+    if (parsedTags.some((t) => t.trim().toLowerCase() === tagLower)) {
+      matches.push({ artist: row.artist_key, tags: parsedTags });
+    }
+  }
+
+  const totalMatching = matches.length;
+  const pageArtists = matches.slice(offset, offset + limit);
+
+  return {
+    tag,
+    artists: pageArtists,
+    pagination: {
+      total_matching: totalMatching,
+      offset,
+      limit,
+      has_more: offset + pageArtists.length < totalMatching,
+    },
+  };
+}
+
 /**
  * Looks up additional metadata for a track, album, or artist using MusicBrainz IDs (MBIDs).
  * Inspects both local enrichment caches in Luminous and optional live MusicBrainz API responses.

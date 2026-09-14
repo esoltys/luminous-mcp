@@ -56,6 +56,7 @@ Here are prompt examples demonstrating natural language queries you can ask your
 - "Add an album description for 'Random Access Memories' citing [Pitchfork](https://pitchfork.com/reviews/albums/18044-daft-punk-random-access-memories/) and [Rolling Stone](https://www.rollingstone.com/music/music-album-reviews/random-access-memories-107771/) reviews."
 - "Update the artist profile for Cannons with their official website, Bandcamp, and biographical summary."
 - "What tags and external links are associated with my album 'Hysteria'?"
+- "Which artists in my library are tagged Canadian?"
 
 ### Playlist Creation & Curation
 

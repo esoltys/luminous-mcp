@@ -4,6 +4,7 @@ import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
   auditMetadata,
+  findArtistsByTag,
   getAlbumProfile,
   getArtistProfile,
   getGenreHierarchy,
@@ -12,6 +13,7 @@ import {
   updateArtistProfile,
   updateTrackMetadata,
   type AuditMetadataOptions,
+  type FindArtistsByTagOptions,
   type LookupMusicBrainzParams,
   type MissingMetadataField,
   type MusicBrainzEntityType,
@@ -400,6 +402,65 @@ export function registerCurationTools(
             {
               type: "text" as const,
               text: `Failed to update artist profile: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.tool(
+    "find_artists_by_tag",
+    "Find all artists in the curated library whose artist profile has a given tag (e.g. nationality like 'Canadian' or an award like 'Grammy Award'). Case-insensitive exact match against tags set via update_artist_profile.",
+    {
+      tag: z.string().min(1).describe("Tag to search for, e.g. 'Canadian' or 'Grammy Award'"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(100)
+        .optional()
+        .describe("Maximum matching artists to return (default 100, max 500)"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .optional()
+        .describe("Pagination offset (default 0)"),
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+
+      try {
+        const handle = db.getHandle();
+        const options: FindArtistsByTagOptions = {
+          tag: params.tag,
+          limit: params.limit,
+          offset: params.offset,
+        };
+
+        const results = findArtistsByTag(handle, options);
+
+        return formatMcpResponse(results);
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to find artists by tag: ${err.message ?? String(err)}`,
             },
           ],
         };
