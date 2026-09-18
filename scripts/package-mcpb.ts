@@ -118,15 +118,15 @@ try {
       },
       {
         name: "get_recent_history",
-        description: "Get chronological playback history from play_history table with timestamps and playback context",
+        description: "Get chronological playback history of past tracks from play_history table with timestamps and playback context",
       },
       {
         name: "get_playback_state",
-        description: "Get live playback state, current track, position, volume, and transport status",
+        description: "Get live playback state, currently playing track, position, volume, and transport status",
       },
       {
         name: "control_playback",
-        description: "Control playback transport (play, pause, next, previous, seek, volume, shuffle, repeat)",
+        description: "Control playback transport (play, pause, resume, next, previous, seek, volume, shuffle, repeat)",
       },
       {
         name: "play_tracks",

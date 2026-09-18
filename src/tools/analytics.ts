@@ -117,7 +117,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
 
   server.tool(
     "get_recent_history",
-    "Get chronological playback history from Luminous play_history table, including played timestamp, playback duration, and playback context (standalone song, album, or playlist name).",
+    "Get chronological playback history of previously played / past songs from Luminous play_history table, including played timestamp, playback duration, and playback context (standalone song, album, or playlist name). NOTE: Use get_playback_state instead if the user is asking what is currently playing.",
     {
       limit: z
         .number()

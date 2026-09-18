@@ -15,7 +15,7 @@ export function registerPlaybackTools(
 ): void {
   server.tool(
     "get_playback_state",
-    "Get the live playback state from the active Luminous Music Player desktop instance, including currently playing track, status (playing/paused/stopped), position, duration, volume, and shuffle/repeat modes.",
+    "Get the live playback state and currently playing song from the active Luminous Music Player desktop instance. Returns the now playing track (title, artist, album), status (playing/paused/stopped), position, duration, volume, and shuffle/repeat modes. Use this tool whenever asked what is currently playing, what song is on, or for playback status.",
     {},
     async () => {
       try {
@@ -37,7 +37,7 @@ export function registerPlaybackTools(
 
   server.tool(
     "control_playback",
-    "Control live audio playback and transport in the active Luminous Music Player desktop instance (play, pause, play_pause, next, previous, seek, set_volume, set_shuffle, set_repeat).",
+    "Control live audio playback and transport in the active Luminous Music Player desktop instance (play, pause, resume, play_pause, next/skip, previous, seek, set_volume, set_shuffle, set_repeat).",
     {
       action: z
         .enum([
