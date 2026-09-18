@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSync, cpSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -60,7 +60,13 @@ try {
   console.log("2. Copying icon asset...");
   copyFileSync(iconSource, path.join(stagingDir, "icon.png"));
 
-  console.log("3. Generating MCPB manifest.json...");
+  const skillsSource = path.join(projectRoot, "skills");
+  if (existsSync(skillsSource)) {
+    console.log("3. Copying skills directory...");
+    cpSync(skillsSource, path.join(stagingDir, "skills"), { recursive: true });
+  }
+
+  console.log("4. Generating MCPB manifest.json...");
   const manifest = {
     $schema: "https://modelcontextprotocol.io/schemas/mcpb/v0.3/manifest.schema.json",
     manifest_version: "0.3",
@@ -167,7 +173,7 @@ try {
     });
   };
 
-  console.log("4. Validating manifest with mcpb...");
+  console.log("5. Validating manifest with mcpb...");
   const validateResult = runMcpb(["validate", manifestPath]);
 
   if (validateResult.status !== 0) {
@@ -177,7 +183,7 @@ try {
   const outputMcpb = path.join(distDir, "luminous-mcp.mcpb");
   const outputDxt = path.join(distDir, "luminous-mcp.dxt");
 
-  console.log(`5. Packing bundle to ${outputMcpb}...`);
+  console.log(`6. Packing bundle to ${outputMcpb}...`);
   const packResult = runMcpb(["pack", stagingDir, outputMcpb]);
 
   if (packResult.status !== 0) {
