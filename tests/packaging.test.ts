@@ -40,7 +40,7 @@ describe("MCPB Packaging Assets & Configuration", () => {
     expect(fs.existsSync(scriptPath)).toBe(true);
   });
 
-  it("packages bundle and produces valid .mcpb and .dxt archives", () => {
+  it("packages bundle and produces valid .mcpb and .dxt archives", async () => {
     const result = Bun.spawnSync(["bun", "run", "scripts/package-mcpb.ts"], {
       cwd: projectRoot,
       env: process.env,
@@ -54,5 +54,11 @@ describe("MCPB Packaging Assets & Configuration", () => {
     expect(fs.existsSync(dxtPath)).toBe(true);
     expect(fs.statSync(mcpbPath).size).toBeGreaterThan(1000);
     expect(fs.statSync(dxtPath).size).toBeGreaterThan(1000);
+
+    // Verify skills are included inside the bundle archive
+    const { unzipSync } = await import("fflate");
+    const mcpbBuffer = fs.readFileSync(mcpbPath);
+    const files = unzipSync(new Uint8Array(mcpbBuffer));
+    expect(files["skills/luminous/SKILL.md"]).toBeDefined();
   }, 30000);
 });
