@@ -10,6 +10,7 @@ An MCP (Model Context Protocol) server that lets AI assistants query and control
 
 - Install: `bun install`
 - Run server: `bun run start`
+- Run SSE server (network/container): `bun run start:sse`
 - Type check: `bun run typecheck` (`tsc --noEmit`)
 - Test all: `bun test`
 - Test single file: `bun test tests/library.test.ts`
@@ -45,4 +46,6 @@ No lint script is defined; rely on `bun run typecheck` and `bun test`.
 - `LUMINOUS_DB_PATH` — absolute path to `luminous.db`, overrides all default-location detection.
 - `LUMINOUS_DATA_DIR` — directory containing `luminous.db`, used if `LUMINOUS_DB_PATH` isn't set.
 - `LUMINOUS_BRIDGE_URL` / `LUMINOUS_BRIDGE_PORT` — override the desktop bridge target (default `http://127.0.0.1:21849`).
+- `LUMINOUS_MCP_PORT` — port for the SSE server (default `21850`).
+- `LUMINOUS_MCP_HOST` — bind host for the SSE server (default `0.0.0.0`).
 - `LUMINOUS_PRETTY_JSON=1` — pretty-print tool response JSON (debugging only; increases token usage).

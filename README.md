@@ -133,6 +133,34 @@ Alternatively, add `luminous` to your `claude_desktop_config.json` or MCP client
 }
 ```
 
+### Network, Container & Sandboxed Environments (SSE Transport)
+
+When running AI assistants or agents inside a container, WSL sandbox, or remote host, run Luminous MCP natively on the host with the SSE HTTP transport:
+
+```bash
+bun run start:sse
+```
+
+By default, this listens on `http://0.0.0.0:21850/sse` (override with `LUMINOUS_MCP_PORT` and `LUMINOUS_MCP_HOST`). It also exposes a `GET /health` endpoint for health checks.
+
+Connect your client using the SSE URL:
+
+```json
+{
+  "mcpServers": {
+    "luminous": {
+      "url": "http://<host-ip>:21850/sse"
+    }
+  }
+}
+```
+
+For OpenClaw running in WSL or Docker:
+
+```bash
+openclaw mcp add luminous --url http://<host-ip>:21850/sse --transport sse
+```
+
 ## Development
 
 - **Typecheck**: `bun run typecheck`
