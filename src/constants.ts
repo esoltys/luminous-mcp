@@ -30,3 +30,10 @@ export const LINUX_IDENTIFIER = "org.luminous.music";
 export const DEFAULT_BRIDGE_HOST = "127.0.0.1";
 export const DEFAULT_BRIDGE_PORT = 21849;
 export const DEFAULT_BRIDGE_URL = `http://${DEFAULT_BRIDGE_HOST}:${DEFAULT_BRIDGE_PORT}`;
+
+/**
+ * Default host and port for the Luminous MCP SSE/HTTP transport server.
+ */
+export const DEFAULT_SSE_HOST = "0.0.0.0";
+export const DEFAULT_SSE_PORT = 21850;
+

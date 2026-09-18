@@ -14,7 +14,9 @@
     "package": "bun run package:mcpb",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "start:sse": "bun run src/sse.ts",
+    "serve:sse": "bun run src/sse.ts"
   },
   "keywords": [
     "mcp",
