@@ -1006,6 +1006,20 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       db.close();
     });
 
+    it("skips the live lookup when Luminous is in Offline mode", async () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT);");
+      db.run("INSERT INTO app_state (key, value) VALUES ('context_enrichment_enabled', 'false');");
+
+      const result = await lookupMusicBrainz(db, { track_id: 1 });
+
+      expect(result.live_data).toBeUndefined();
+      expect(result.message).toContain("Offline mode");
+      expect(result.source).toBe("local_cache");
+
+      db.close();
+    });
+
     it("returns not_found when track has no MBID", async () => {
       const db = setupCurationTestDb(tempDbPath);
 

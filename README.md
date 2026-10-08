@@ -107,6 +107,10 @@ bun run build
 bun run start
 ```
 
+#### Portable Luminous installs
+
+In portable mode (a `portable` or `luminous.portable` file, or a `data/` folder, next to the Luminous executable) the library lives in `<luminous folder>/data/luminous.db`, which the server cannot discover automatically. Point it there with `LUMINOUS_DATA_DIR=<luminous folder>/data` (or `LUMINOUS_DB_PATH`).
+
 ### One-Click Install (Claude Desktop)
 
 Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelcontextprotocol/mcpb) format:
