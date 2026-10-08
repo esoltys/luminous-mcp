@@ -12,6 +12,7 @@ import {
   extractBioLinks,
   findArtistsByTag,
   getAlbumProfile,
+  getArtistEvents,
   getArtistProfile,
   getGenreHierarchy,
   lookupMusicBrainz,
@@ -987,6 +988,39 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
     });
   });
 
+  describe("getArtistEvents", () => {
+    const mbid = "9c935736-7530-41e4-b776-1dbcf534c061";
+
+    it("reports no_cache when nothing has been fetched", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = getArtistEvents(db, { artist: "Clean Artist" });
+      expect(res.status).toBe("no_cache");
+      expect(res.events).toEqual([]);
+      db.close();
+    });
+
+    it("returns upcoming events sorted, hiding past ones unless asked", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run("CREATE TABLE artist_events_cache (artist_mbid TEXT PRIMARY KEY, events_json TEXT NOT NULL DEFAULT '[]', fetched_at INTEGER NOT NULL);");
+      const events = [
+        { id: "c", name: "Festival", begin_date: "2027", cancelled: false },
+        { id: "a", name: "Old Show", begin_date: "2026-01-05", cancelled: false },
+        { id: "b", name: "Next Show", begin_date: "2026-11-02", cancelled: true, venue_city: "Oslo", ticket_urls: ["https://t.example"] },
+      ];
+      db.run("INSERT INTO artist_events_cache VALUES (?, ?, ?)", [mbid, JSON.stringify(events), 1_700_000_000]);
+
+      const upcoming = getArtistEvents(db, { artist: "Clean Artist", today: "2026-10-08" });
+      expect(upcoming.status).toBe("ok");
+      expect(upcoming.total_cached).toBe(3);
+      expect(upcoming.events.map((e) => e.name)).toEqual(["Next Show", "Festival"]);
+      expect(upcoming.events[0]!.cancelled).toBe(true);
+
+      const all = getArtistEvents(db, { artist_id: mbid, include_past: true, today: "2026-10-08" });
+      expect(all.events.length).toBe(3);
+      db.close();
+    });
+  });
+
   describe("lookupMusicBrainz", () => {
     it("looks up track MBIDs and returns local context enrichment", async () => {
       const db = setupCurationTestDb(tempDbPath);
@@ -1069,6 +1103,7 @@ describe("MCP Curation Tools Integration", () => {
     expect(toolNames).toContain("get_genre_hierarchy");
     expect(toolNames).toContain("update_track_metadata");
     expect(toolNames).toContain("get_artist_profile");
+    expect(toolNames).toContain("get_artist_events");
     expect(toolNames).toContain("update_artist_profile");
     expect(toolNames).toContain("find_artists_by_tag");
     expect(toolNames).toContain("lookup_musicbrainz");
