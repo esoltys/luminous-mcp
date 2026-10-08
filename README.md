@@ -165,6 +165,16 @@ For OpenClaw running in WSL or Docker:
 openclaw mcp add luminous --url http://<host-ip>:21850/sse --transport sse
 ```
 
+## Releasing
+
+Bump `version` in `package.json` and `SERVER_VERSION` in `src/constants.ts` (a test keeps them equal), merge to `main`, then push a matching tag:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The Release workflow builds `.mcpb` bundles for Windows, macOS (arm64/x64) and Linux (x64/arm64), writes `SHA256SUMS.txt`, and attaches everything to a GitHub Release. `bun run scripts/package-mcpb.ts --target bun-linux-x64` builds a single cross-compiled bundle locally.
+
 ## Development
 
 - **Typecheck**: `bun run typecheck`

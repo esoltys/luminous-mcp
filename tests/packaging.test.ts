@@ -2,6 +2,9 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { SERVER_VERSION } from "../src/constants.ts";
+import { buildManifest, listRegisteredTools } from "../scripts/manifest.ts";
+
 const projectRoot = path.resolve(import.meta.dir, "..");
 
 describe("MCPB Packaging Assets & Configuration", () => {
@@ -61,4 +64,30 @@ describe("MCPB Packaging Assets & Configuration", () => {
     const files = unzipSync(new Uint8Array(mcpbBuffer));
     expect(files["skills/luminous/SKILL.md"]).toBeDefined();
   }, 30000);
+
+  it("keeps SERVER_VERSION in sync with package.json", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
+    expect(SERVER_VERSION).toBe(pkg.version);
+  });
+
+  it("generates manifest tools from the registered tools", async () => {
+    const tools = await listRegisteredTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("get_artist_events");
+    expect(names).toContain("ping");
+
+    const manifest = await buildManifest({
+      name: "luminous-mcp",
+      version: "1.2.3",
+      description: "d",
+      authorName: "a",
+      license: "MIT",
+      binaryName: "luminous-mcp",
+      platform: "linux",
+      screenshots: [],
+    });
+    expect(manifest.tools.map((t) => t.name)).toEqual(names);
+    expect(manifest.compatibility.platforms).toEqual(["linux"]);
+    expect(manifest.user_config.db_path.type).toBe("file");
+  });
 });
