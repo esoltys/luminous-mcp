@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: [ "v*" ]
+  # Dry run: builds everything and uploads the bundles as a workflow artifact,
+  # without creating a GitHub Release.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,6 +27,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
         run: |
           pkg_version="$(bun -e 'console.log(require("./package.json").version)')"
           if [ "v${pkg_version}" != "${GITHUB_REF_NAME}" ]; then
@@ -46,7 +50,17 @@ jobs:
         working-directory: dist
         run: sha256sum luminous-mcp-*.mcpb > SHA256SUMS.txt
 
+      - name: Upload bundles (dry run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-bundles
+          path: |
+            dist/luminous-mcp-*.mcpb
+            dist/SHA256SUMS.txt
+
       - name: Create GitHub Release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
