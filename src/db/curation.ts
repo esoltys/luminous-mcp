@@ -1565,7 +1565,7 @@ export async function lookupMusicBrainz(
     try {
       const response = await fetch(url, {
         headers: {
-          "User-Agent": "LuminousMCP/1.0.0 ( https://github.com/esoltys/luminous-mcp; esoltys@users.noreply.github.com )",
+          "User-Agent": "LuminousMCP/1.0.1 ( https://github.com/esoltys/luminous-mcp; esoltys@users.noreply.github.com )",
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(5000),
