@@ -119,6 +119,10 @@ try {
         description: "Get artist summary including catalog size, albums, genres, collaborators, and listening stats",
       },
       {
+        name: "get_artist_events",
+        description: "List an artist's upcoming concerts and tour dates from Luminous's cached MusicBrainz data",
+      },
+      {
         name: "get_listening_stats",
         description: "Analyze listening habits, top tracks, top artists, forgotten favorites, and frequently skipped music",
       },

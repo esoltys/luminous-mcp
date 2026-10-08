@@ -26,6 +26,8 @@ When interacting with Luminous Music Player and the local music library, use the
   Use `get_track_details` (or `luminous__get_track_details`) for audio formats, sample rate, bit depth, lyrics, and acoustic metrics.
 - **Artist summaries & discography:**
   Use `get_artist_summary` (or `luminous__get_artist_summary`) for catalog statistics, albums owned, top tracks, and collaborators.
+- **Upcoming concerts:**
+  Use `get_artist_events` for cached tour dates and concerts (empty until the artist has been opened in Luminous with Online mode on).
 
 ## Listening Habits & History
 - **Top tracks, top artists, forgotten favorites, skip patterns:**
