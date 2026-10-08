@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, copyFileSyn
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { buildManifest, type McpbPlatform } from "./manifest.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
 const pkgPath = path.join(projectRoot, "package.json");
@@ -22,6 +24,20 @@ if (!existsSync(iconSource)) {
 
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 const version = pkg.version || "0.1.0";
+
+// Optional cross-compile: `--target bun-linux-x64` (bun-{windows|darwin|linux}-{x64|arm64}).
+const targetArg = process.argv.includes("--target") ? process.argv[process.argv.indexOf("--target") + 1] : undefined;
+const target = targetArg ? parseTarget(targetArg) : undefined;
+
+function parseTarget(bunTarget: string): { bunTarget: string; platform: McpbPlatform; label: string } {
+  const m = /^bun-(windows|darwin|linux)-(x64|arm64)(?:-.+)?$/.exec(bunTarget);
+  if (!m) {
+    console.error(`Unsupported --target "${bunTarget}" (expected bun-{windows|darwin|linux}-{x64|arm64})`);
+    process.exit(1);
+  }
+  const platform: McpbPlatform = m[1] === "windows" ? "win32" : (m[1] as McpbPlatform);
+  return { bunTarget, platform, label: `${m[1]}-${m[2]}` };
+}
 const stagingDir = path.join(os.tmpdir(), `luminous-mcpb-staging-${Date.now()}`);
 
 console.log(`Building MCP Bundle for ${pkg.name} v${version}...`);
@@ -35,7 +51,8 @@ if (!existsSync(stagingDir)) {
 }
 
 try {
-  const binaryName = process.platform === "win32" ? "luminous-mcp.exe" : "luminous-mcp";
+  const bundlePlatform = target ? target.platform : (process.platform as McpbPlatform);
+  const binaryName = bundlePlatform === "win32" ? "luminous-mcp.exe" : "luminous-mcp";
   const stagingBinary = path.join(stagingDir, binaryName);
   const distBinary = path.join(distDir, binaryName);
 
@@ -44,6 +61,7 @@ try {
     "build",
     path.join(projectRoot, "src", "index.ts"),
     "--compile",
+    ...(target ? [`--target=${target.bunTarget}`] : []),
     `--outfile=${stagingBinary}`,
   ], {
     cwd: projectRoot,
@@ -54,8 +72,8 @@ try {
     throw new Error(`Failed to compile standalone binary (exit code: ${compileResult.status})`);
   }
 
-  // Also copy to dist for standalone binary usage
-  copyFileSync(stagingBinary, distBinary);
+  // Also copy to dist for standalone binary usage (native builds only)
+  if (!target) copyFileSync(stagingBinary, distBinary);
 
   console.log("2. Copying icon asset...");
   copyFileSync(iconSource, path.join(stagingDir, "icon.png"));
@@ -66,93 +84,28 @@ try {
     cpSync(skillsSource, path.join(stagingDir, "skills"), { recursive: true });
   }
 
+  const docsDir = path.join(projectRoot, "docs");
+  const screenshotNames = existsSync(docsDir)
+    ? readdirSync(docsDir).filter((f) => /^screenshot-.*\.(png|jpe?g)$/.test(f)).sort()
+    : [];
+  if (screenshotNames.length > 0) {
+    mkdirSync(path.join(stagingDir, "screenshots"), { recursive: true });
+    for (const f of screenshotNames) {
+      copyFileSync(path.join(docsDir, f), path.join(stagingDir, "screenshots", f));
+    }
+  }
+
   console.log("4. Generating MCPB manifest.json...");
-  const manifest = {
-    $schema: "https://modelcontextprotocol.io/schemas/mcpb/v0.3/manifest.schema.json",
-    manifest_version: "0.3",
+  const manifest = await buildManifest({
     name: pkg.name,
-    display_name: "Luminous Music Player",
     version,
     description: pkg.description || "MCP server for Luminous Music Player",
-    long_description:
-      "Connects Claude Desktop and other MCP hosts to your local Luminous Music Player library and database. " +
-      "Provides direct access to your music metadata, schema, and playback information.",
-    author: {
-      name: typeof pkg.author === "string" ? pkg.author : pkg.author?.name ?? "Eric James Soltys",
-      url: "https://github.com/esoltys/luminous-mcp",
-    },
-    homepage: "https://github.com/esoltys/luminous-mcp",
-    repository: {
-      type: "git",
-      url: "https://github.com/esoltys/luminous-mcp.git",
-    },
+    authorName: typeof pkg.author === "string" ? pkg.author : pkg.author?.name ?? "Eric James Soltys",
     license: pkg.license || "MIT",
-    icon: "icon.png",
-    server: {
-      type: "binary",
-      entry_point: binaryName,
-      mcp_config: {
-        command: `\${__dirname}/${binaryName}`,
-        args: [],
-        env: {},
-      },
-    },
-    tools: [
-      {
-        name: "ping",
-        description: "Check server connectivity, uptime, and basic health",
-      },
-      {
-        name: "get_server_info",
-        description: "Get Luminous MCP server metadata, database resolution status, schema version, and library size",
-      },
-      {
-        name: "search_library",
-        description: "Search music library tracks with full-text search and structured filters (genre, year, BPM, loudness)",
-      },
-      {
-        name: "get_track_details",
-        description: "Get comprehensive metadata, audio specs, acoustic measurements, lyrics, and IDs for a track",
-      },
-      {
-        name: "get_artist_summary",
-        description: "Get artist summary including catalog size, albums, genres, collaborators, and listening stats",
-      },
-      {
-        name: "get_artist_events",
-        description: "List an artist's upcoming concerts and tour dates from Luminous's cached MusicBrainz data",
-      },
-      {
-        name: "get_listening_stats",
-        description: "Analyze listening habits, top tracks, top artists, forgotten favorites, and frequently skipped music",
-      },
-      {
-        name: "get_recent_history",
-        description: "Get chronological playback history of past tracks from play_history table with timestamps and playback context",
-      },
-      {
-        name: "get_playback_state",
-        description: "Get live playback state, currently playing track, position, volume, and transport status",
-      },
-      {
-        name: "control_playback",
-        description: "Control playback transport (play, pause, resume, next, previous, seek, volume, shuffle, repeat)",
-      },
-      {
-        name: "play_tracks",
-        description: "Replace active playback queue with track IDs and immediately begin playback",
-      },
-      {
-        name: "pause_after_track",
-        description: "Pause or stop playback cleanly when current track finishes (at next track start or current track end)",
-      },
-    ],
-    keywords: ["music", "audio", "luminous", "library", "player", "metadata"],
-    compatibility: {
-      claude_desktop: ">=0.10.0",
-      platforms: [process.platform === "win32" ? "win32" : process.platform],
-    },
-  };
+    binaryName,
+    platform: bundlePlatform,
+    screenshots: screenshotNames.map((f) => `screenshots/${f}`),
+  });
 
   const manifestPath = path.join(stagingDir, "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
@@ -184,7 +137,7 @@ try {
     throw new Error(`Manifest validation failed with status ${validateResult.status}`);
   }
 
-  const outputMcpb = path.join(distDir, "luminous-mcp.mcpb");
+  const outputMcpb = path.join(distDir, target ? `luminous-mcp-${target.label}.mcpb` : "luminous-mcp.mcpb");
   const outputDxt = path.join(distDir, "luminous-mcp.dxt");
 
   console.log(`6. Packing bundle to ${outputMcpb}...`);
@@ -194,12 +147,13 @@ try {
     throw new Error(`mcpb pack failed with status ${packResult.status}`);
   }
 
-  // Also create .dxt copy for backward compatibility
-  copyFileSync(outputMcpb, outputDxt);
-
   console.log("\n Successfully generated MCP Bundles:");
   console.log(`  - ${outputMcpb}`);
-  console.log(`  - ${outputDxt}`);
+  if (!target) {
+    // Also create .dxt copy for backward compatibility
+    copyFileSync(outputMcpb, outputDxt);
+    console.log(`  - ${outputDxt}`);
+  }
   console.log("Ready for one-click drag-and-drop installation into Claude Desktop!");
 } finally {
   try {
