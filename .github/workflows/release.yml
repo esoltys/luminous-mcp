@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # keyless cosign signing via GitHub OIDC
 
 jobs:
   release:
@@ -50,6 +51,15 @@ jobs:
         working-directory: dist
         run: sha256sum luminous-mcp-*.mcpb > SHA256SUMS.txt
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless: the signing identity is this workflow run (recorded in the public
+      # Sigstore log), so no key or certificate has to be bought or stored.
+      - name: Sign checksums with cosign
+        working-directory: dist
+        run: cosign sign-blob --yes --bundle SHA256SUMS.txt.sigstore.json SHA256SUMS.txt
+
       - name: Upload bundles (dry run)
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
@@ -58,11 +68,12 @@ jobs:
           path: |
             dist/luminous-mcp-*.mcpb
             dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sigstore.json
 
       - name: Create GitHub Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/luminous-mcp-*.mcpb dist/SHA256SUMS.txt \
+          gh release create "${GITHUB_REF_NAME}" dist/luminous-mcp-*.mcpb dist/SHA256SUMS.txt dist/SHA256SUMS.txt.sigstore.json \
             --title "${GITHUB_REF_NAME}" --generate-notes
