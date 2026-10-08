@@ -60,6 +60,7 @@ export interface SearchLibraryTrackItem {
   bpm?: number | null;
   loudness_lufs?: number | null;
   play_count?: number;
+  loved?: true;
 }
 
 export interface SearchLibraryResult {
@@ -130,6 +131,7 @@ export interface TrackDetails {
     rating: number;
     play_count: number;
     skip_count: number;
+    loved?: true;
     last_played: number | null;
     added: number | null;
   };
@@ -197,6 +199,20 @@ function buildFtsQuery(raw: string): string {
 }
 
 /**
+ * Checks if a column exists in a table.
+ */
+function hasColumn(db: Database, tableName: string, columnName: string): boolean {
+  try {
+    return db
+      .query<{ name: string }, []>(`PRAGMA table_info(${tableName})`)
+      .all()
+      .some((col) => col.name === columnName);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Checks if a table exists in the database.
  */
 function hasTable(db: Database, tableName: string): boolean {
@@ -218,6 +234,8 @@ function hasTable(db: Database, tableName: string): boolean {
 export function searchLibrary(db: Database, params: SearchLibraryParams = {}): SearchLibraryResult {
   const limit = Math.max(1, Math.min(100, params.limit ?? 25));
   const offset = Math.max(0, params.offset ?? 0);
+  // songs.loved arrived in Luminous schema v55; older databases lack it.
+  const lovedSelect = hasColumn(db, "songs", "loved") ? ", s.loved" : "";
   const whereClauses: string[] = ["s.unavailable = 0"];
   const queryParams: Record<string, unknown> = {
     $limit: limit,
@@ -322,7 +340,7 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
       s.bpm,
       s.ebur128_integrated_loudness_lufs,
       s.length_nanosec,
-      s.playcount
+      s.playcount${lovedSelect}
     FROM songs s
     WHERE ${whereClauses.join(" AND ")}
     ORDER BY COALESCE(s.album_artist_sort, s.album_artist, s.artist), COALESCE(s.albumsort, s.album), s.disc, s.track
@@ -366,7 +384,7 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
           s.bpm,
           s.ebur128_integrated_loudness_lufs,
           s.length_nanosec,
-          s.playcount
+          s.playcount${lovedSelect}
         FROM songs s
         WHERE ${fallbackWhere.join(" AND ")}
         ORDER BY COALESCE(s.album_artist_sort, s.album_artist, s.artist), COALESCE(s.albumsort, s.album), s.disc, s.track
@@ -400,6 +418,7 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
         album: r.album ?? null,
         year: r.year ?? null,
         duration_seconds: durationSeconds,
+        loved: r.loved === 1 ? true : undefined,
       };
     }
 
@@ -422,6 +441,7 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
           : null,
       duration_seconds: durationSeconds,
       play_count: r.playcount ?? 0,
+      loved: r.loved === 1 ? true : undefined,
     };
   });
 
@@ -531,6 +551,7 @@ export function getTrackDetails(
       rating: row.rating ?? -1,
       play_count: row.playcount ?? 0,
       skip_count: row.skipcount ?? 0,
+      loved: row.loved === 1 ? true : undefined,
       last_played: row.lastplayed ?? null,
       added: row.added ?? null,
     },

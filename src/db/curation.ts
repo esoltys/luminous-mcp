@@ -1405,6 +1405,18 @@ export function findArtistsByTag(
   };
 }
 
+function isLuminousOffline(db: Database): boolean {
+  if (!hasTable(db, "app_state")) return false;
+  try {
+    const row = db
+      .query<{ value: string }, []>("SELECT value FROM app_state WHERE key = 'context_enrichment_enabled'")
+      .get();
+    return row?.value === "false";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Looks up additional metadata for a track, album, or artist using MusicBrainz IDs (MBIDs).
  * Inspects both local enrichment caches in Luminous and optional live MusicBrainz API responses.
@@ -1415,7 +1427,10 @@ export async function lookupMusicBrainz(
 ): Promise<LookupMusicBrainzResult> {
   let mbid = params.mbid?.trim() ?? null;
   let entityType = params.entity_type;
-  const fetchLive = params.fetch_live ?? true;
+  // Luminous's master Online/Offline toggle (app_state.context_enrichment_enabled);
+  // absent means "never turned off".
+  const offline = isLuminousOffline(db);
+  const fetchLive = (params.fetch_live ?? true) && !offline;
 
   let trackInfo: LookupMusicBrainzResult["track"] | undefined;
   let localEnrichment: LookupMusicBrainzResult["local_enrichment"] | undefined;
@@ -1531,7 +1546,10 @@ export async function lookupMusicBrainz(
   }
 
   let liveData: Record<string, unknown> | undefined;
-  let apiMessage: string | undefined;
+  let apiMessage: string | undefined =
+    offline && (params.fetch_live ?? true)
+      ? "Luminous is in Offline mode (Settings > Integrations); live MusicBrainz lookup skipped. Returning local data if available."
+      : undefined;
 
   if (fetchLive && mbid) {
     const incParamMap: Record<MusicBrainzEntityType, string> = {

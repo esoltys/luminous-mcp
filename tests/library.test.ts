@@ -537,6 +537,49 @@ describe("Library Database Functions", () => {
   });
 });
 
+describe("songs.loved flag", () => {
+  let tempDir: string;
+  let tempDbPath: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "luminous-loved-test-"));
+    tempDbPath = path.join(tempDir, "luminous.db");
+    initTestDb(tempDbPath);
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
+  });
+
+  it("omits loved on databases without the column", () => {
+    const db = new Database(tempDbPath, { readonly: true });
+    const res = searchLibrary(db, { limit: 5 });
+    expect(res.count).toBeGreaterThan(0);
+    expect(res.tracks.every((t) => t.loved === undefined)).toBe(true);
+    db.close();
+  });
+
+  it("reports loved only for loved tracks in search and details", () => {
+    const w = new Database(tempDbPath);
+    w.run("ALTER TABLE songs ADD COLUMN loved INTEGER NOT NULL DEFAULT 0;");
+    const firstId = (w.query("SELECT id FROM songs WHERE unavailable = 0 ORDER BY id LIMIT 1").get() as { id: number }).id;
+    w.run("UPDATE songs SET loved = 1 WHERE id = ?", [firstId]);
+    w.close();
+
+    const db = new Database(tempDbPath, { readonly: true });
+    const res = searchLibrary(db, { limit: 100 });
+    for (const t of res.tracks) {
+      expect(t.loved).toBe(t.id === firstId ? true : undefined);
+    }
+    expect(getTrackDetails(db, firstId)?.stats.loved).toBe(true);
+    db.close();
+  });
+});
+
 describe("MCP Library Tools Integration", () => {
   let tempDir: string;
   let tempDbPath: string;
