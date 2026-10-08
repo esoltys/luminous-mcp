@@ -6,6 +6,7 @@ import {
   auditMetadata,
   findArtistsByTag,
   getAlbumProfile,
+  getArtistEvents,
   getArtistProfile,
   getGenreHierarchy,
   lookupMusicBrainz,
@@ -301,6 +302,48 @@ export function registerCurationTools(
             {
               type: "text" as const,
               text: `Failed to retrieve artist profile: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.tool(
+    "get_artist_events",
+    "List an artist's upcoming concerts, tour dates and festival appearances from the cache Luminous keeps (MusicBrainz data; read-only, no network). Returns nothing until the artist has been opened in Luminous with Online mode on.",
+    {
+      artist: z.string().optional().describe("Artist name"),
+      artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
+      include_past: z.boolean().optional().describe("Also include events that already happened (default false)"),
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+      if (!params.artist && !params.artist_id) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: "Either artist or artist_id must be provided." }],
+        };
+      }
+      try {
+        return formatMcpResponse(getArtistEvents(db.getHandle(), params));
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to retrieve artist events: ${err.message ?? String(err)}`,
             },
           ],
         };

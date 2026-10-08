@@ -1616,3 +1616,111 @@ export async function lookupMusicBrainz(
     message: apiMessage,
   };
 }
+
+export interface ArtistEvent {
+  name: string;
+  event_type?: string | null;
+  begin_date?: string | null;
+  end_date?: string | null;
+  time?: string | null;
+  cancelled?: boolean;
+  venue_name?: string | null;
+  venue_city?: string | null;
+  venue_country?: string | null;
+  ticket_urls?: string[];
+  event_urls?: string[];
+  disambiguation?: string | null;
+}
+
+export interface GetArtistEventsResult {
+  artist: string;
+  musicbrainz_artist_id?: string;
+  status: "ok" | "no_artist_id" | "no_cache";
+  message?: string;
+  /** Unix seconds when Luminous last fetched this list from MusicBrainz. */
+  fetched_at?: number;
+  total_cached?: number;
+  events: ArtistEvent[];
+}
+
+/**
+ * Reads the artist concert/tour list Luminous caches in `artist_events_cache`.
+ * Never hits the network: the cache is filled when the artist is viewed in Luminous.
+ * Dates are MusicBrainz partial dates (YYYY, YYYY-MM or YYYY-MM-DD), compared as
+ * prefixes so a "2027" event still counts as upcoming in 2026.
+ */
+export function getArtistEvents(
+  db: Database,
+  options: { artist?: string; artist_id?: string; include_past?: boolean; today?: string }
+): GetArtistEventsResult {
+  const profile = getArtistProfile(db, { artist: options.artist, artist_id: options.artist_id });
+  const artist = profile?.artist ?? options.artist ?? options.artist_id ?? "";
+  const mbid = profile?.musicbrainz_artist_id ?? options.artist_id?.trim() ?? null;
+
+  if (!mbid) {
+    return {
+      artist,
+      status: "no_artist_id",
+      message: "No MusicBrainz artist ID is known for this artist, so no concert data is available.",
+      events: [],
+    };
+  }
+
+  const row = hasTable(db, "artist_events_cache")
+    ? db
+        .query<{ events_json: string; fetched_at: number }, [string]>(
+          "SELECT events_json, fetched_at FROM artist_events_cache WHERE artist_mbid = ?1"
+        )
+        .get(mbid)
+    : null;
+  if (!row) {
+    return {
+      artist,
+      musicbrainz_artist_id: mbid,
+      status: "no_cache",
+      message: "No concert data cached yet. Open the artist page in Luminous (with Online mode on) to fetch it.",
+      events: [],
+    };
+  }
+
+  let all: ArtistEvent[] = [];
+  try {
+    const parsed = JSON.parse(row.events_json);
+    if (Array.isArray(parsed)) all = parsed;
+  } catch {
+    // Treat a corrupt cache row as empty.
+  }
+
+  const today = options.today ?? new Date().toISOString().slice(0, 10);
+  const keep = options.include_past
+    ? all
+    : all.filter((e) => {
+        const end = e.end_date || e.begin_date;
+        return !!end && end >= today.slice(0, end.length);
+      });
+  const events = keep
+    .map((e) => ({
+      name: e.name,
+      event_type: e.event_type,
+      begin_date: e.begin_date,
+      end_date: e.end_date,
+      time: e.time,
+      cancelled: e.cancelled ? true : undefined,
+      venue_name: e.venue_name,
+      venue_city: e.venue_city,
+      venue_country: e.venue_country,
+      ticket_urls: e.ticket_urls,
+      event_urls: e.event_urls,
+      disambiguation: e.disambiguation,
+    }))
+    .sort((a, b) => (a.begin_date ?? "").localeCompare(b.begin_date ?? ""));
+
+  return {
+    artist,
+    musicbrainz_artist_id: mbid,
+    status: "ok",
+    fetched_at: row.fetched_at,
+    total_cached: all.length,
+    events,
+  };
+}
