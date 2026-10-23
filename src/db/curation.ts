@@ -768,8 +768,8 @@ export function updateTrackMetadata(
       if (params.album !== undefined) {
         bindParams.$album = params.album;
         if (hasAlbumKeyCol) {
-          const key = albumKey(params.album);
-          bindParams.$album_key = key !== "" ? key : null;
+          const foldedKey = albumKey(params.album);
+          bindParams.$album_key = foldedKey !== "" ? foldedKey : null;
         }
       }
       if (params.album_artist !== undefined) bindParams.$album_artist = params.album_artist;
@@ -1082,6 +1082,15 @@ export function updateArtistProfile(
   };
 }
 
+interface RawAlbumProfile {
+  album_key: string;
+  artist_key: string | null;
+  description: string | null;
+  website: string | null;
+  tags: string;
+  links: string;
+}
+
 /**
  * Retrieves an album's curated profile (description, website, tags, links/sources)
  * and MusicBrainz release-group context enrichment from the database.
@@ -1114,7 +1123,8 @@ export function getAlbumProfile(
         const mbCol = hasMbRg
           ? ", MAX(musicbrainz_release_group_id) AS musicbrainz_release_group_id"
           : "";
-        querySql = `SELECT album, COALESCE(MAX(album_artist), MAX(artist)) AS resolved_artist, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol} FROM songs WHERE album_key = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1`;
+        // Mirrors Luminous album_display_sql: picks the most common spelling in the library, with binary tiebreaker
+        querySql = `SELECT album, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol} FROM songs WHERE album_key = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1`;
         queryParam = albumKey(albumName);
       } else {
         querySql = hasMbRg
@@ -1135,7 +1145,7 @@ export function getAlbumProfile(
     } else if (releaseGroupMbid && !albumName) {
       if (hasColumn(db, "songs", "musicbrainz_release_group_id")) {
         const querySql = hasAlbumKeyCol
-          ? "SELECT album, COALESCE(MAX(album_artist), MAX(artist)) AS resolved_artist, MAX(album_artist) AS album_artist, MAX(artist) AS artist FROM songs WHERE musicbrainz_release_group_id = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1"
+          ? "SELECT album, MAX(album_artist) AS album_artist, MAX(artist) AS artist FROM songs WHERE musicbrainz_release_group_id = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1"
           : "SELECT album, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1";
         const songRow = db.query<any, [string]>(querySql).get(releaseGroupMbid);
         if (songRow && songRow.album) {
@@ -1145,15 +1155,6 @@ export function getAlbumProfile(
         }
       }
     }
-  }
-
-  interface RawAlbumProfile {
-    album_key: string;
-    artist_key: string | null;
-    description: string | null;
-    website: string | null;
-    tags: string;
-    links: string;
   }
 
   let rawProfile: RawAlbumProfile | null = null;
@@ -1304,47 +1305,19 @@ export function updateAlbumProfile(
   const hasSongsTable = hasTable(db, "songs");
   const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
 
-  let existing: {
-    album_key: string;
-    artist_key: string | null;
-    description: string | null;
-    website: string | null;
-    tags: string;
-    links: string;
-  } | null = null;
-
+  let existing: RawAlbumProfile | null = null;
   let keyToUse: string;
 
   if (hasAlbumKeyCol) {
     keyToUse = albumKey(albumName);
     existing = db
-      .query<
-        {
-          album_key: string;
-          artist_key: string | null;
-          description: string | null;
-          website: string | null;
-          tags: string;
-          links: string;
-        },
-        [string, string]
-      >(
+      .query<RawAlbumProfile, [string, string]>(
         "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 OR album_key = ?2 COLLATE NOCASE ORDER BY CASE WHEN album_key = ?1 THEN 0 ELSE 1 END LIMIT 1"
       )
       .get(keyToUse, albumName);
   } else {
     existing = db
-      .query<
-        {
-          album_key: string;
-          artist_key: string | null;
-          description: string | null;
-          website: string | null;
-          tags: string;
-          links: string;
-        },
-        [string]
-      >(
+      .query<RawAlbumProfile, [string]>(
         "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
       )
       .get(albumName);
@@ -1379,6 +1352,7 @@ export function updateAlbumProfile(
     [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
   );
 
+  // Query using albumName so getAlbumProfile resolves the dominant library display title
   const updatedProfile = getAlbumProfile(db, { album: albumName })!;
 
   return {
