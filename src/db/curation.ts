@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { albumKey, sameAlbum } from "../utils/albumKey.ts";
+
+export { albumKey, sameAlbum };
 
 export type MissingMetadataField =
   | "year"
@@ -688,6 +691,7 @@ export function updateTrackMetadata(
   // Validate that at least one metadata field is specified
   const fieldsToUpdate: Record<string, unknown> = {};
   const setClauses: string[] = [];
+  const hasAlbumKeyCol = hasColumn(db, "songs", "album_key");
 
   if (params.genre !== undefined) {
     fieldsToUpdate.genre = params.genre;
@@ -711,7 +715,11 @@ export function updateTrackMetadata(
   }
   if (params.album !== undefined) {
     fieldsToUpdate.album = params.album;
-    setClauses.push("album = $album");
+    if (hasAlbumKeyCol) {
+      setClauses.push("album = $album, album_key = $album_key");
+    } else {
+      setClauses.push("album = $album");
+    }
   }
   if (params.album_artist !== undefined) {
     fieldsToUpdate.album_artist = params.album_artist;
@@ -757,7 +765,13 @@ export function updateTrackMetadata(
       if (params.composer !== undefined) bindParams.$composer = params.composer;
       if (params.title !== undefined) bindParams.$title = params.title;
       if (params.artist !== undefined) bindParams.$artist = params.artist;
-      if (params.album !== undefined) bindParams.$album = params.album;
+      if (params.album !== undefined) {
+        bindParams.$album = params.album;
+        if (hasAlbumKeyCol) {
+          const key = albumKey(params.album);
+          bindParams.$album_key = key !== "" ? key : null;
+        }
+      }
       if (params.album_artist !== undefined) bindParams.$album_artist = params.album_artist;
       if (params.lyrics !== undefined) bindParams.$lyrics = params.lyrics;
 
@@ -1087,13 +1101,29 @@ export function getAlbumProfile(
   let resolvedArtistName: string | null = null;
   let songFound = false;
 
-  if (hasTable(db, "songs")) {
+  const hasSongsTable = hasTable(db, "songs");
+  const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
+
+  if (hasSongsTable) {
     if (albumName && !releaseGroupMbid) {
       const hasMbRg = hasColumn(db, "songs", "musicbrainz_release_group_id");
-      const querySql = hasMbRg
-        ? "SELECT album, album_artist, artist, musicbrainz_release_group_id FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1"
-        : "SELECT album, album_artist, artist FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1";
-      const songRow = db.query<any, [string]>(querySql).get(albumName);
+      let querySql: string;
+      let queryParam: string;
+
+      if (hasAlbumKeyCol) {
+        const mbCol = hasMbRg
+          ? ", MAX(musicbrainz_release_group_id) AS musicbrainz_release_group_id"
+          : "";
+        querySql = `SELECT album, COALESCE(MAX(album_artist), MAX(artist)) AS resolved_artist, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol} FROM songs WHERE album_key = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1`;
+        queryParam = albumKey(albumName);
+      } else {
+        querySql = hasMbRg
+          ? "SELECT album, album_artist, artist, musicbrainz_release_group_id FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1"
+          : "SELECT album, album_artist, artist FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1";
+        queryParam = albumName;
+      }
+
+      const songRow = db.query<any, [string]>(querySql).get(queryParam);
       if (songRow) {
         songFound = true;
         resolvedAlbumName = songRow.album ?? albumName;
@@ -1104,11 +1134,10 @@ export function getAlbumProfile(
       }
     } else if (releaseGroupMbid && !albumName) {
       if (hasColumn(db, "songs", "musicbrainz_release_group_id")) {
-        const songRow = db
-          .query<any, [string]>(
-            "SELECT album, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1"
-          )
-          .get(releaseGroupMbid);
+        const querySql = hasAlbumKeyCol
+          ? "SELECT album, COALESCE(MAX(album_artist), MAX(artist)) AS resolved_artist, MAX(album_artist) AS album_artist, MAX(artist) AS artist FROM songs WHERE musicbrainz_release_group_id = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1"
+          : "SELECT album, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1";
+        const songRow = db.query<any, [string]>(querySql).get(releaseGroupMbid);
         if (songRow && songRow.album) {
           songFound = true;
           resolvedAlbumName = songRow.album;
@@ -1130,11 +1159,19 @@ export function getAlbumProfile(
   let rawProfile: RawAlbumProfile | null = null;
   if (hasTable(db, "album_profiles")) {
     if (resolvedAlbumName) {
-      rawProfile = db
-        .query<RawAlbumProfile, [string]>(
-          "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
-        )
-        .get(resolvedAlbumName);
+      if (hasAlbumKeyCol) {
+        rawProfile = db
+          .query<RawAlbumProfile, [string, string]>(
+            "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 OR album_key = ?2 COLLATE NOCASE ORDER BY CASE WHEN album_key = ?1 THEN 0 ELSE 1 END LIMIT 1"
+          )
+          .get(albumKey(resolvedAlbumName), resolvedAlbumName);
+      } else {
+        rawProfile = db
+          .query<RawAlbumProfile, [string]>(
+            "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+          )
+          .get(resolvedAlbumName);
+      }
     }
   }
 
@@ -1208,7 +1245,7 @@ export function getAlbumProfile(
   const bioSources = extractBioLinks(rawProfile?.description);
 
   return {
-    album: rawProfile?.album_key ?? resolvedAlbumName,
+    album: resolvedAlbumName || (rawProfile?.album_key ?? ""),
     artist: rawProfile?.artist_key ?? resolvedArtistName,
     description: rawProfile?.description ?? null,
     website: rawProfile?.website ?? null,
@@ -1264,23 +1301,55 @@ export function updateAlbumProfile(
   }
 
   // Check existing row
-  const existing = db
-    .query<
-      {
-        album_key: string;
-        artist_key: string | null;
-        description: string | null;
-        website: string | null;
-        tags: string;
-        links: string;
-      },
-      [string]
-    >(
-      "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
-    )
-    .get(albumName);
+  const hasSongsTable = hasTable(db, "songs");
+  const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
 
-  const keyToUse = existing?.album_key ?? albumName;
+  let existing: {
+    album_key: string;
+    artist_key: string | null;
+    description: string | null;
+    website: string | null;
+    tags: string;
+    links: string;
+  } | null = null;
+
+  let keyToUse: string;
+
+  if (hasAlbumKeyCol) {
+    keyToUse = albumKey(albumName);
+    existing = db
+      .query<
+        {
+          album_key: string;
+          artist_key: string | null;
+          description: string | null;
+          website: string | null;
+          tags: string;
+          links: string;
+        },
+        [string, string]
+      >(
+        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 OR album_key = ?2 COLLATE NOCASE ORDER BY CASE WHEN album_key = ?1 THEN 0 ELSE 1 END LIMIT 1"
+      )
+      .get(keyToUse, albumName);
+  } else {
+    existing = db
+      .query<
+        {
+          album_key: string;
+          artist_key: string | null;
+          description: string | null;
+          website: string | null;
+          tags: string;
+          links: string;
+        },
+        [string]
+      >(
+        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+      )
+      .get(albumName);
+    keyToUse = existing?.album_key ?? albumName;
+  }
   const newArtist = params.artist !== undefined ? params.artist : (existing?.artist_key ?? null);
   const newDescription =
     params.description !== undefined ? params.description : (existing?.description ?? null);
@@ -1310,11 +1379,11 @@ export function updateAlbumProfile(
     [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
   );
 
-  const updatedProfile = getAlbumProfile(db, { album: keyToUse })!;
+  const updatedProfile = getAlbumProfile(db, { album: albumName })!;
 
   return {
     success: true,
-    album: keyToUse,
+    album: updatedProfile?.album ?? albumName,
     updated_fields: fieldsUpdated,
     profile: updatedProfile,
   };
