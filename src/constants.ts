@@ -5,7 +5,7 @@ export const SERVER_VERSION = "1.0.1";
  * Current database schema version supported by this server,
  * matching Luminous Music Player's CURRENT_SCHEMA_VERSION.
  */
-export const KNOWN_SCHEMA_VERSION = 61;
+export const KNOWN_SCHEMA_VERSION = 62;
 
 /**
  * Database filename within the app data directory.
