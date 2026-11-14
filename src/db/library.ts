@@ -809,7 +809,7 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
     }
     // EXISTS (not JOIN): artist_key is case-sensitive unique, so case variants
     // could otherwise duplicate an artist row.
-    hasProfileExpr = `EXISTS (SELECT 1 FROM artist_profiles p WHERE p.artist_key = g.name COLLATE NOCASE AND (${nonEmpty.join(" OR ")}))`;
+    hasProfileExpr = `EXISTS (SELECT 1 FROM artist_profiles p WHERE p.artist_key = grouped.name COLLATE NOCASE AND (${nonEmpty.join(" OR ")}))`;
   }
 
   const bindings: Record<string, string | number> = {};
@@ -817,33 +817,33 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
     bindings.$name = `%${nameFilter.replace(/[\\%_]/g, "\\$&")}%`;
   }
 
-  const base = `
+  const filteredArtistsSql = `
     WITH names AS (${nameSources.join(" UNION ")}),
-    g AS (
+    grouped AS (
       SELECT MIN(name) AS name, COUNT(DISTINCT id) AS track_count
       FROM names GROUP BY name COLLATE NOCASE
     ),
     artists AS (
-      SELECT g.name AS name, g.track_count AS track_count, ${hasProfileExpr} AS has_profile
-      FROM g
-      ${nameFilter ? "WHERE g.name LIKE $name ESCAPE '\\'" : ""}
+      SELECT grouped.name AS name, grouped.track_count AS track_count, ${hasProfileExpr} AS has_profile
+      FROM grouped
+      ${nameFilter ? "WHERE grouped.name LIKE $name ESCAPE '\\'" : ""}
     )
     SELECT name, track_count, has_profile FROM artists
     ${options.has_profile !== undefined ? `WHERE has_profile = ${options.has_profile ? 1 : 0}` : ""}`;
 
   const orderBy =
     sort === "track_count"
-      ? "ORDER BY track_count DESC, name COLLATE NOCASE ASC, name ASC"
-      : "ORDER BY name COLLATE NOCASE ASC, name ASC";
+      ? "ORDER BY track_count DESC, name COLLATE NOCASE ASC"
+      : "ORDER BY name COLLATE NOCASE ASC";
 
   const total =
     db
-      .query<{ n: number }, any>(`SELECT COUNT(*) AS n FROM (${base})`)
+      .query<{ n: number }, any>(`SELECT COUNT(*) AS n FROM (${filteredArtistsSql})`)
       .get(bindings)?.n ?? 0;
 
   const rows = db
     .query<{ name: string; track_count: number; has_profile: number }, any>(
-      `${base} ${orderBy} LIMIT $limit OFFSET $offset`
+      `${filteredArtistsSql} ${orderBy} LIMIT $limit OFFSET $offset`
     )
     .all({ ...bindings, $limit: limit, $offset: offset });
 
