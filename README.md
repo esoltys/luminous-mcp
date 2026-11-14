@@ -119,11 +119,11 @@ Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelc
 2. Open Claude Desktop, go to **Settings > Extensions > Advanced settings**, and click **Install Extension...** (or drag the `.mcpb` file into **Settings > Extensions**).
 3. Click **Install**.
 
-> **Note:** Anthropic deprecated standalone `.mcpb` desktop extension listings in the public Claude directory (`claude.ai/directory`). For public directory distribution, this repository also ships a Claude Plugin Bundle (`.claude-plugin/plugin.json`, `.mcp.json`, and `skills/luminous/`).
+> **Note:** Anthropic deprecated standalone `.mcpb` desktop extension listings in `claude.ai/directory`, and public directory submissions for local (`stdio`) MCP servers are currently restricted to Verified organizations using `node`/`python`/`bash` launchers (whereas `luminous-mcp` uses `bun:sqlite`). Use the signed `.mcpb` releases above for Claude Desktop, or the Plugin Bundle below for direct Claude Code installs.
 
-### Claude Plugin Bundle (Claude Directory)
+### Claude Plugin Bundle (Claude Code)
 
-This repository includes `.claude-plugin/plugin.json`, `.mcp.json`, and `skills/luminous/SKILL.md` for installation as a Claude Plugin Bundle (requires [Bun](https://bun.sh) v1.1+ on `PATH`).
+This repository includes `.claude-plugin/plugin.json`, `.mcp.json`, and `skills/luminous/SKILL.md` for direct installation as a local Claude Code plugin from GitHub (requires [Bun](https://bun.sh) v1.1+ on `PATH`).
 
 ### Manual Configuration (Claude Desktop, Antigravity, Cursor)
 
@@ -199,14 +199,9 @@ git tag v0.2.0 && git push origin v0.2.0
 
 The Release workflow builds `.mcpb` bundles for Windows, macOS (arm64/x64) and Linux (x64/arm64), signs them, writes `SHA256SUMS.txt` (signed with Cosign), publishes `server.json` to the official MCP Registry (`io.github.esoltys/luminous-mcp`), and attaches everything to a GitHub Release. `bun run scripts/package-mcpb.ts --target bun-linux-x64` builds a single cross-compiled bundle locally.
 
-### Publishing & Updating in the Claude Directory
+### Claude Directory Status
 
-Because Anthropic deprecated standalone `.mcpb` directory submissions in favor of Plugin Bundles, public directory updates are managed via the Claude developer portal (`https://claude.ai/directory/manage`, requires a paid Claude plan):
-
-1. Ensure `bun run typecheck` and `bun test` pass (and optionally `claude plugin validate .` if the Claude CLI is installed).
-2. Merge the release bump to `main` and tag the release.
-3. **Initial submission:** Open `https://claude.ai/directory/manage`, choose **Submit new → Plugin bundle**, and link `https://github.com/esoltys/luminous-mcp`.
-4. **Updating an existing listing:** Directory listings pull from the linked GitHub repository; verify the updated version and validation status in `https://claude.ai/directory/manage` after merging to `main`.
+Public `claude.ai/directory` submissions via `https://claude.ai/directory/manage` are currently not supported for `luminous-mcp` because Anthropic's directory validator restricts local (`stdio`) MCP servers and lockfile-based plugins to Verified organizations and only permits `node`, `python3`, `python`, `bash`, or `sh` launchers (not `bun`). Distribution for Claude users is handled through signed `.mcpb` GitHub Releases, the official MCP Registry (`io.github.esoltys/luminous-mcp`), and direct GitHub plugin installation in Claude Code.
 
 ## Development
 
