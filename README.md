@@ -167,7 +167,14 @@ openclaw mcp add luminous --url http://<host-ip>:21850/sse --transport sse
 
 ## Verifying downloads
 
-Each release publishes `SHA256SUMS.txt` plus `SHA256SUMS.txt.sigstore.json`, a [cosign](https://docs.sigstore.dev/) keyless signature made by this repository's Release workflow (no certificate is bought or stored; the signing identity is recorded in the public Sigstore log). To verify a download:
+Each `.mcpb` bundle is signed with an embedded PEM signature (`mcpb sign`), and each release publishes `SHA256SUMS.txt` plus `SHA256SUMS.txt.sigstore.json`, a [cosign](https://docs.sigstore.dev/) keyless signature made by this repository's Release workflow (no certificate is bought or stored; the signing identity is recorded in the public Sigstore log). To verify a download:
+
+```bash
+bun x @anthropic-ai/mcpb verify luminous-mcp-linux-x64.mcpb
+bun x @anthropic-ai/mcpb info luminous-mcp-linux-x64.mcpb
+```
+
+And to verify the release checksums with Cosign:
 
 ```bash
 cosign verify-blob SHA256SUMS.txt \
@@ -177,7 +184,7 @@ cosign verify-blob SHA256SUMS.txt \
 sha256sum --check --ignore-missing SHA256SUMS.txt   # macOS: shasum -a 256 -c
 ```
 
-The bundles themselves are not OS code-signed, so Windows SmartScreen or macOS Gatekeeper may warn on first run.
+The `.mcpb` signature verifies the bundle archive itself; the standalone binaries inside are not OS code-signed, so Windows SmartScreen or macOS Gatekeeper may warn on first run.
 
 ## Releasing
 
