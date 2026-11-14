@@ -113,11 +113,11 @@ jobs:
           set -euo pipefail
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
           arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          archive="${RUNNER_TEMP}/mcp-publisher_${os}_${arch}.tar.gz"
           base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
 
-          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
-          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/mcp-publisher_${os}_${arch}.tar.gz"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/mcp-publisher_${os}_${arch}.tar.gz.sigstore.json"
 
           cosign verify-blob \
             --bundle "$archive.sigstore.json" \
@@ -125,8 +125,8 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$archive"
 
-          tar xz -f "$archive" mcp-publisher
-          ./mcp-publisher validate
+          tar xz -f "$archive" -C "${RUNNER_TEMP}" mcp-publisher
+          "${RUNNER_TEMP}/mcp-publisher" validate
 
       - name: Upload bundles (dry run)
         if: github.ref_type != 'tag'
@@ -150,5 +150,5 @@ jobs:
       - name: Publish to MCP Registry
         if: github.ref_type == 'tag'
         run: |
-          ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
+          "${RUNNER_TEMP}/mcp-publisher" login github-oidc
+          "${RUNNER_TEMP}/mcp-publisher" publish

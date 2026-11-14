@@ -100,8 +100,11 @@ describe("MCP Registry server.json generator", () => {
       fs.writeFileSync(path.join(tmpDir, "dist", "SHA256SUMS.txt"), sumsContent, "utf8");
 
       const outPath = path.join(tmpDir, "server.json");
-      const generated = generateServerJsonFromDist(tmpDir, { outPath });
+      const { serverJson: generated, outPath: writtenPath } = generateServerJsonFromDist(tmpDir, {
+        outPath,
+      });
 
+      expect(writtenPath).toBe(outPath);
       expect(fs.existsSync(outPath)).toBe(true);
       const written = JSON.parse(fs.readFileSync(outPath, "utf8"));
       expect(written).toEqual(generated);

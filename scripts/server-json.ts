@@ -137,7 +137,7 @@ export function buildServerJson(opts: ServerJsonOptions): ServerJson {
 export function generateServerJsonFromDist(
   projectRoot: string,
   opts?: { version?: string; outPath?: string; sumsPath?: string }
-): ServerJson {
+): { serverJson: ServerJson; outPath: string } {
   const pkgPath = path.join(projectRoot, "package.json");
   if (!existsSync(pkgPath)) {
     throw new Error(`package.json not found at ${pkgPath}`);
@@ -162,14 +162,19 @@ export function generateServerJsonFromDist(
   const outPath = opts?.outPath ?? path.join(projectRoot, "dist", "server.json");
   mkdirSync(path.dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(serverJson, null, 2)}\n`, "utf8");
-  return serverJson;
+  return { serverJson, outPath };
 }
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const getArg = (flag: string): string | undefined => {
     const idx = args.indexOf(flag);
-    return idx !== -1 ? args[idx + 1] : undefined;
+    if (idx === -1) return undefined;
+    const value = args[idx + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`Missing value for ${flag}`);
+    }
+    return value;
   };
 
   const projectRoot = path.resolve(import.meta.dir, "..");
@@ -177,7 +182,11 @@ if (import.meta.main) {
   const outPath = outArg ? path.resolve(projectRoot, outArg) : undefined;
   const version = getArg("--version");
 
-  const result = generateServerJsonFromDist(projectRoot, { outPath, version });
-  const targetPath = outPath ?? path.join(projectRoot, "dist", "server.json");
-  console.log(`Generated ${targetPath} (${result.packages.length} mcpb packages, v${result.version})`);
+  const { serverJson, outPath: writtenPath } = generateServerJsonFromDist(projectRoot, {
+    outPath,
+    version,
+  });
+  console.log(
+    `Generated ${writtenPath} (${serverJson.packages.length} mcpb packages, v${serverJson.version})`
+  );
 }
