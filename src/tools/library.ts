@@ -4,6 +4,7 @@ import type { LuminousDatabase } from "../db/connection.ts";
 import {
   getArtistSummary,
   getTrackDetails,
+  listArtists,
   searchLibrary,
   type SearchLibraryParams,
 } from "../db/library.ts";
@@ -14,6 +15,70 @@ import { READ_ONLY_LOCAL } from "./annotations.ts";
  * Registers music library inspection and search tools on the MCP server instance.
  */
 export function registerLibraryTools(server: McpServer, db: LuminousDatabase): void {
+  server.registerTool(
+    "list_artists",
+    {
+      title: "List Artists",
+      description:
+        "List every artist in the library (paginated), regardless of play count or year. A name counts if it appears in a track's artist or album_artist (case-insensitive). Returns canonical name, track_count and has_profile (curated profile exists) so curation gaps are one call away. Compound credits like 'A feat. B' appear as their own entry.",
+      inputSchema: {
+      has_profile: z
+        .boolean()
+        .optional()
+        .describe("true: only artists with a curated profile; false: only artists without one"),
+      name: z.string().optional().describe("Case-insensitive substring of the artist name"),
+      sort: z
+        .enum(["name", "track_count"])
+        .default("name")
+        .optional()
+        .describe("'name' (A-Z, default) or 'track_count' (most tracks first)"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(100)
+        .optional()
+        .describe("Maximum artists to return (default 100, max 500)"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .optional()
+        .describe("Pagination offset (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+
+      try {
+        return formatMcpResponse(listArtists(db.getHandle(), params));
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to list artists: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   server.registerTool(
     "search_library",
     {

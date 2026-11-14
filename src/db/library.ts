@@ -743,3 +743,125 @@ export function getArtistSummary(
     },
   };
 }
+
+export interface ListArtistsOptions {
+  /** Only artists with (true) or without (false) a curated profile. */
+  has_profile?: boolean;
+  /** Case-insensitive substring of the artist name. Blank is ignored. */
+  name?: string;
+  /** "name" (default, A-Z) or "track_count" (most tracks first). Ties break by name. */
+  sort?: "name" | "track_count";
+  limit?: number;
+  offset?: number;
+}
+
+export interface ArtistListItem {
+  artist: string;
+  track_count: number;
+  has_profile: boolean;
+}
+
+export interface ListArtistsResult {
+  artists: ArtistListItem[];
+  pagination: {
+    total_matching: number;
+    offset: number;
+    limit: number;
+    has_more: boolean;
+  };
+}
+
+/**
+ * Enumerates every artist in the library, independent of play count and year.
+ *
+ * A name is an artist if it appears (trimmed, non-blank) in `songs.artist` OR
+ * `songs.album_artist`; names are grouped case-insensitively, matching how
+ * `getArtistProfile` resolves them. `track_count` counts distinct tracks, so a
+ * track naming the same artist in both columns counts once. `has_profile` is
+ * true when `artist_profiles` holds a row with any non-empty field; a missing
+ * table simply means nobody has a profile. Ordering is total (ties break by
+ * name), so walking pages with `offset` never skips or repeats an artist.
+ */
+export function listArtists(db: Database, options: ListArtistsOptions = {}): ListArtistsResult {
+  const limit = Math.max(1, Math.min(500, options.limit ?? 100));
+  const offset = Math.max(0, options.offset ?? 0);
+  const sort = options.sort ?? "name";
+  const nameFilter = options.name?.trim();
+
+  const songWhere = librarySongWhere(db, "s");
+  const nameSources = [
+    `SELECT s.id AS id, TRIM(s.artist) AS name FROM songs s WHERE ${songWhere} AND TRIM(COALESCE(s.artist, '')) != ''`,
+  ];
+  if (hasColumn(db, "songs", "album_artist")) {
+    nameSources.push(
+      `SELECT s.id AS id, TRIM(s.album_artist) AS name FROM songs s WHERE ${songWhere} AND TRIM(COALESCE(s.album_artist, '')) != ''`
+    );
+  }
+
+  // Names with a curated profile, lowercased once. Built as a set (not a
+  // per-artist correlated lookup) because artist_key is BINARY-collated, so a
+  // NOCASE comparison cannot use its index and would rescan every profile for
+  // each artist. A set also keeps case-variant profile rows from duplicating
+  // an artist. Tolerates older artist_profiles schemas.
+  let profiledNamesSql = "SELECT NULL AS key WHERE 0";
+  if (hasTable(db, "artist_profiles")) {
+    const nonEmpty = ["COALESCE(TRIM(bio), '') != ''", "COALESCE(TRIM(website), '') != ''"];
+    for (const col of ["tags", "social_links"]) {
+      if (hasColumn(db, "artist_profiles", col)) {
+        nonEmpty.push(`COALESCE(TRIM(${col}), '') NOT IN ('', '[]')`);
+      }
+    }
+    profiledNamesSql = `SELECT DISTINCT LOWER(artist_key) AS key FROM artist_profiles WHERE ${nonEmpty.join(" OR ")}`;
+  }
+
+  const bindings: Record<string, string | number> = {};
+  if (nameFilter) {
+    bindings.$name = `%${nameFilter.replace(/[\\%_]/g, "\\$&")}%`;
+  }
+
+  const filteredArtistsSql = `
+    WITH names AS (${nameSources.join(" UNION ")}),
+    grouped AS (
+      SELECT MIN(name) AS name, COUNT(DISTINCT id) AS track_count
+      FROM names GROUP BY name COLLATE NOCASE
+    ),
+    profiled AS (${profiledNamesSql}),
+    artists AS (
+      SELECT grouped.name AS name, grouped.track_count AS track_count,
+             LOWER(grouped.name) IN (SELECT key FROM profiled) AS has_profile
+      FROM grouped
+      ${nameFilter ? "WHERE grouped.name LIKE $name ESCAPE '\\'" : ""}
+    )
+    SELECT name, track_count, has_profile FROM artists
+    ${options.has_profile !== undefined ? `WHERE has_profile = ${options.has_profile ? 1 : 0}` : ""}`;
+
+  const orderBy =
+    sort === "track_count"
+      ? "ORDER BY track_count DESC, name COLLATE NOCASE ASC"
+      : "ORDER BY name COLLATE NOCASE ASC";
+
+  const total =
+    db
+      .query<{ n: number }, any>(`SELECT COUNT(*) AS n FROM (${filteredArtistsSql})`)
+      .get(bindings)?.n ?? 0;
+
+  const rows = db
+    .query<{ name: string; track_count: number; has_profile: number }, any>(
+      `${filteredArtistsSql} ${orderBy} LIMIT $limit OFFSET $offset`
+    )
+    .all({ ...bindings, $limit: limit, $offset: offset });
+
+  return {
+    artists: rows.map((r) => ({
+      artist: r.name,
+      track_count: r.track_count,
+      has_profile: r.has_profile === 1,
+    })),
+    pagination: {
+      total_matching: total,
+      offset,
+      limit,
+      has_more: offset + rows.length < total,
+    },
+  };
+}
