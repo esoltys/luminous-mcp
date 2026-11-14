@@ -23,6 +23,7 @@ import {
   type UpdateTrackMetadataParams,
 } from "../db/curation.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
 
 /**
  * Registers metadata hygiene and curation assistant tools on the MCP server instance.
@@ -32,10 +33,13 @@ export function registerCurationTools(
   db: LuminousDatabase,
   bridgeClient?: LuminousBridgeClient
 ): void {
-  server.tool(
+  server.registerTool(
     "audit_metadata",
-    "Audit the music library for missing metadata (artwork, lyrics, release year, genre, composer, loudness) with summary counts and paginated track samples.",
     {
+      title: "Audit Metadata",
+      description:
+        "Audit the music library for missing metadata (artwork, lyrics, release year, genre, composer, loudness) with summary counts and paginated track samples.",
+      inputSchema: {
       missing_fields: z
         .array(z.enum(["year", "genre", "composer", "lyrics", "art", "loudness"]))
         .optional()
@@ -67,6 +71,8 @@ export function registerCurationTools(
         .default(0)
         .optional()
         .describe("Pagination offset (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -110,17 +116,22 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_genre_hierarchy",
-    "Get the user's curated genre hierarchy and tag taxonomy from Luminous (tag groups, assigned tags, and unassigned library tags).",
     {
-      include_unassigned: z
-        .boolean()
-        .default(true)
-        .optional()
-        .describe(
-          "Whether to include unassigned genres/tags found in the library that have no tag group assignment (default true)"
-        ),
+      title: "Get Genre Hierarchy",
+      description:
+        "Get the user's curated genre hierarchy and tag taxonomy from Luminous (tag groups, assigned tags, and unassigned library tags).",
+      inputSchema: {
+        include_unassigned: z
+          .boolean()
+          .default(true)
+          .optional()
+          .describe(
+            "Whether to include unassigned genres/tags found in the library that have no tag group assignment (default true)"
+          ),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -156,10 +167,13 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_track_metadata",
-    "Update metadata fields (genre, release year, composer, title, artist, album, album artist, lyrics) for one or more tracks in the Luminous database.",
     {
+      title: "Update Track Metadata",
+      description:
+        "Update metadata fields (genre, release year, composer, title, artist, album, album artist, lyrics) for one or more tracks in the Luminous database.",
+      inputSchema: {
       track_id: z
         .number()
         .int()
@@ -177,6 +191,8 @@ export function registerCurationTools(
       album: z.string().optional().describe("New album for the track(s)"),
       album_artist: z.string().optional().describe("New album artist for the track(s)"),
       lyrics: z.string().optional().describe("New lyrics text for the track(s)"),
+      },
+      annotations: WRITE_IDEMPOTENT,
     },
     async (params) => {
       if (!db.exists()) {
@@ -243,12 +259,17 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_artist_profile",
-    "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID).",
     {
-      artist: z.string().optional().describe("Artist name to inspect"),
-      artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
+      title: "Get Artist Profile",
+      description:
+        "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID).",
+      inputSchema: {
+        artist: z.string().optional().describe("Artist name to inspect"),
+        artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -309,13 +330,21 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_artist_events",
-    "List an artist's upcoming concerts, tour dates and festival appearances from the cache Luminous keeps (MusicBrainz data; read-only, no network). Returns nothing until the artist has been opened in Luminous with Online mode on.",
     {
-      artist: z.string().optional().describe("Artist name"),
-      artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
-      include_past: z.boolean().optional().describe("Also include events that already happened (default false)"),
+      title: "Get Artist Events",
+      description:
+        "List an artist's upcoming concerts, tour dates and festival appearances from the cache Luminous keeps (MusicBrainz data; read-only, no network). Returns nothing until the artist has been opened in Luminous with Online mode on.",
+      inputSchema: {
+        artist: z.string().optional().describe("Artist name"),
+        artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
+        include_past: z
+          .boolean()
+          .optional()
+          .describe("Also include events that already happened (default false)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -351,13 +380,16 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_artist_profile",
-    "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
-      "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
-      "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
-      "tags/links rules below.",
     {
+      title: "Update Artist Profile",
+      description:
+        "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
+        "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
+        "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
+        "tags/links rules below.",
+      inputSchema: {
       artist: z.string().min(1).describe("Artist name whose profile is being updated"),
       bio: z
         .string()
@@ -402,6 +434,8 @@ export function registerCurationTools(
         .describe(
           "External links (alias for social_links) - official artist/label-controlled links only. No Twitter/X, fan sites, unofficial wikis, or forums."
         ),
+      },
+      annotations: WRITE_IDEMPOTENT,
     },
     async (params) => {
       if (!db.exists()) {
@@ -452,26 +486,31 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "find_artists_by_tag",
-    "Find all artists in the curated library whose artist profile has a given tag (e.g. nationality like 'Canadian' or an award like 'Grammy Award'). Case-insensitive exact match against tags set via update_artist_profile.",
     {
-      tag: z.string().min(1).describe("Tag to search for, e.g. 'Canadian' or 'Grammy Award'"),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(500)
-        .default(100)
-        .optional()
-        .describe("Maximum matching artists to return (default 100, max 500)"),
-      offset: z
-        .number()
-        .int()
-        .min(0)
-        .default(0)
-        .optional()
-        .describe("Pagination offset (default 0)"),
+      title: "Find Artists by Tag",
+      description:
+        "Find all artists in the curated library whose artist profile has a given tag (e.g. nationality like 'Canadian' or an award like 'Grammy Award'). Case-insensitive exact match against tags set via update_artist_profile.",
+      inputSchema: {
+        tag: z.string().min(1).describe("Tag to search for, e.g. 'Canadian' or 'Grammy Award'"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .default(100)
+          .optional()
+          .describe("Maximum matching artists to return (default 100, max 500)"),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .default(0)
+          .optional()
+          .describe("Pagination offset (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -511,13 +550,21 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_album_profile",
-    "Get an album's curated profile (description/liner notes with cited sources, official website, tags, external source/review links, and MusicBrainz release-group context enrichment).",
     {
-      album: z.string().optional().describe("Album title to inspect"),
-      artist: z.string().optional().describe("Optional artist name to disambiguate albums sharing the same title"),
-      release_group_id: z.string().optional().describe("MusicBrainz release group UUID"),
+      title: "Get Album Profile",
+      description:
+        "Get an album's curated profile (description/liner notes with cited sources, official website, tags, external source/review links, and MusicBrainz release-group context enrichment).",
+      inputSchema: {
+        album: z.string().optional().describe("Album title to inspect"),
+        artist: z
+          .string()
+          .optional()
+          .describe("Optional artist name to disambiguate albums sharing the same title"),
+        release_group_id: z.string().optional().describe("MusicBrainz release group UUID"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -579,11 +626,14 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_album_profile",
-    "Update or create an album's curated profile (description, artist association, official website URL, tags, external source/review/storefront links) in the Luminous database. " +
-      "Put every citation, review, and storefront/streaming link in the structured `links` array (not inline markdown) - the app renders `links` as its own UI section, and any link only written into `description` as prose is invisible there.",
     {
+      title: "Update Album Profile",
+      description:
+        "Update or create an album's curated profile (description, artist association, official website URL, tags, external source/review/storefront links) in the Luminous database. " +
+        "Put every citation, review, and storefront/streaming link in the structured `links` array (not inline markdown) - the app renders `links` as its own UI section, and any link only written into `description` as prose is invisible there.",
+      inputSchema: {
       album: z.string().min(1).describe("Album title whose profile is being updated"),
       artist: z.string().optional().describe("Associated album artist or primary artist name"),
       description: z
@@ -612,6 +662,8 @@ export function registerCurationTools(
           "External links, reviews, storefronts, or reference sources - the canonical, app-rendered home for every URL cited for this album. " +
             "Include every source used to write the description here (category: 'source' or 'review'), plus any storefront/streaming links (category: 'store')."
         ),
+      },
+      annotations: WRITE_IDEMPOTENT,
     },
     async (params) => {
       if (!db.exists()) {
@@ -662,10 +714,13 @@ export function registerCurationTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "lookup_musicbrainz",
-    "Look up rich metadata for a track, album, release group, or artist using MusicBrainz IDs (MBIDs), inspecting both local Luminous cache and live MusicBrainz Web API.",
     {
+      title: "Look Up MusicBrainz",
+      description:
+        "Look up rich metadata for a track, album, release group, or artist using MusicBrainz IDs (MBIDs), inspecting both local Luminous cache and live MusicBrainz Web API.",
+      inputSchema: {
       track_id: z
         .number()
         .int()
@@ -686,6 +741,8 @@ export function registerCurationTools(
         .default(true)
         .optional()
         .describe("Whether to fetch live metadata from MusicBrainz API if not in local cache (default true)"),
+      },
+      annotations: READ_ONLY_EXTERNAL,
     },
     async (params) => {
       if (!db.exists()) {

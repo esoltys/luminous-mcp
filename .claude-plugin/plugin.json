@@ -1,0 +1,19 @@
+{
+  "name": "luminous-mcp",
+  "version": "1.12.1",
+  "description": "Connects Claude to your local Luminous Music Player library, metadata, playlists, and playback controls.",
+  "author": {
+    "name": "Eric James Soltys",
+    "url": "https://github.com/esoltys/luminous-mcp"
+  },
+  "homepage": "https://github.com/esoltys/luminous-mcp",
+  "repository": "https://github.com/esoltys/luminous-mcp",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "luminous",
+    "music",
+    "audio"
+  ]
+}

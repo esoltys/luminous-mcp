@@ -8,15 +8,19 @@ import {
   type RecentHistoryParams,
 } from "../db/analytics.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { READ_ONLY_LOCAL } from "./annotations.ts";
 
 /**
  * Registers listening analytics, history, and library insights tools on the MCP server.
  */
 export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase): void {
-  server.tool(
+  server.registerTool(
     "get_listening_stats",
-    "Analyze listening habits, play counts, skipping patterns, top artists, top tracks, and surface forgotten favorites (tracks with high play counts unplayed for N months).",
     {
+      title: "Get Listening Stats",
+      description:
+        "Analyze listening habits, play counts, skipping patterns, top artists, top tracks, and surface forgotten favorites (tracks with high play counts unplayed for N months).",
+      inputSchema: {
       category: z
         .enum(["overview", "top_artists", "top_tracks", "forgotten_favorites", "frequently_skipped"])
         .default("overview")
@@ -70,6 +74,8 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
         .describe(
           "For frequently_skipped: rank by absolute 'skip_count' or proportional 'skip_ratio' (skips / (plays + skips))"
         ),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -115,10 +121,13 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_recent_history",
-    "Get chronological playback history of previously played / past songs from Luminous play_history table, including played timestamp, playback duration, and playback context (standalone song, album, or playlist name). NOTE: Use get_playback_state instead if the user is asking what is currently playing.",
     {
+      title: "Get Recent History",
+      description:
+        "Get chronological playback history of previously played / past songs from Luminous play_history table, including played timestamp, playback duration, and playback context (standalone song, album, or playlist name). NOTE: Use get_playback_state instead if the user is asking what is currently playing.",
+      inputSchema: {
       limit: z
         .number()
         .int()
@@ -169,6 +178,8 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
         .default("desc")
         .optional()
         .describe("Order of history results: 'desc' (most recent first, default) or 'asc' (chronological)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
