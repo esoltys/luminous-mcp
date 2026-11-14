@@ -90,4 +90,26 @@ describe("MCPB Packaging Assets & Configuration", () => {
     expect(manifest.compatibility.platforms).toEqual(["linux"]);
     expect(manifest.user_config.db_path.type).toBe("file");
   });
+
+  it("has valid Claude Plugin Bundle manifests (.claude-plugin/plugin.json and .mcp.json) in sync with package.json", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
+    const pluginPath = path.join(projectRoot, ".claude-plugin", "plugin.json");
+    const mcpPath = path.join(projectRoot, ".mcp.json");
+    const skillPath = path.join(projectRoot, "skills", "luminous", "SKILL.md");
+
+    expect(fs.existsSync(pluginPath)).toBe(true);
+    expect(fs.existsSync(mcpPath)).toBe(true);
+    expect(fs.existsSync(skillPath)).toBe(true);
+
+    const plugin = JSON.parse(fs.readFileSync(pluginPath, "utf8"));
+    expect(plugin.name).toBe(pkg.name);
+    expect(plugin.version).toBe(pkg.version);
+    expect(plugin.license).toBe(pkg.license);
+    expect(plugin.author?.name).toBe(pkg.author);
+    expect(plugin.repository).toContain("github.com/esoltys/luminous-mcp");
+
+    const mcp = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(mcp.mcpServers?.luminous?.command).toBe("bun");
+    expect(mcp.mcpServers?.luminous?.args).toEqual(["run", "${CLAUDE_PLUGIN_ROOT}/src/index.ts"]);
+  });
 });
