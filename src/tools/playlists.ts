@@ -9,6 +9,7 @@ import {
   listPlaylists,
 } from "../db/playlists.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { READ_ONLY_LOCAL, WRITE_NON_IDEMPOTENT } from "./annotations.ts";
 
 /**
  * Registers playlist management tools on the MCP server instance.
@@ -18,10 +19,13 @@ export function registerPlaylistTools(
   db: LuminousDatabase,
   bridgeClient?: LuminousBridgeClient
 ): void {
-  server.tool(
+  server.registerTool(
     "list_playlists",
-    "List all user playlists and dynamic/smart playlists in the Luminous music library, including item counts and creation timestamps.",
     {
+      title: "List Playlists",
+      description:
+        "List all user playlists and dynamic/smart playlists in the Luminous music library, including item counts and creation timestamps.",
+      inputSchema: {
       query: z
         .string()
         .optional()
@@ -31,6 +35,8 @@ export function registerPlaylistTools(
         .default(true)
         .optional()
         .describe("Whether to include dynamic/smart playlists (default true)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -67,10 +73,13 @@ export function registerPlaylistTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_playlist_tracks",
-    "Get the ordered track listing for a specific playlist by ID or name, including track details and position indices.",
     {
+      title: "Get Playlist Tracks",
+      description:
+        "Get the ordered track listing for a specific playlist by ID or name, including track details and position indices.",
+      inputSchema: {
       playlist_id: z
         .number()
         .int()
@@ -95,6 +104,8 @@ export function registerPlaylistTools(
         .default(0)
         .optional()
         .describe("Number of tracks to skip for pagination (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -145,10 +156,12 @@ export function registerPlaylistTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "create_playlist",
-    "Create a new playlist in Luminous with an optional initial list of track IDs.",
     {
+      title: "Create Playlist",
+      description: "Create a new playlist in Luminous with an optional initial list of track IDs.",
+      inputSchema: {
       name: z
         .string()
         .min(1)
@@ -157,6 +170,8 @@ export function registerPlaylistTools(
         .array(z.number().int())
         .optional()
         .describe("Optional array of track IDs to add to the new playlist in order"),
+      },
+      annotations: WRITE_NON_IDEMPOTENT,
     },
     async (params) => {
       if (!db.exists()) {
@@ -200,10 +215,13 @@ export function registerPlaylistTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "add_tracks_to_playlist",
-    "Append track IDs to an existing playlist, maintaining position indexes and UUID generation.",
     {
+      title: "Add Tracks to Playlist",
+      description:
+        "Append track IDs to an existing playlist, maintaining position indexes and UUID generation.",
+      inputSchema: {
       playlist_id: z
         .number()
         .int()
@@ -217,6 +235,8 @@ export function registerPlaylistTools(
         .array(z.number().int())
         .min(1)
         .describe("Non-empty array of track IDs to append to the playlist"),
+      },
+      annotations: WRITE_NON_IDEMPOTENT,
     },
     async (params) => {
       if (!db.exists()) {

@@ -139,4 +139,37 @@ describe("MCP System Tools", () => {
     await server.close();
     db.close();
   });
+
+  it("declares complete MCP tool annotations and titles for all registered tools", async () => {
+    const { server, db } = createMcpServer({ dbPath: tempDbPath });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.length).toBeGreaterThanOrEqual(25);
+
+      for (const tool of tools) {
+        expect(tool.title?.trim().length).toBeGreaterThan(0);
+        expect(typeof tool.annotations?.readOnlyHint).toBe("boolean");
+        expect(typeof tool.annotations?.destructiveHint).toBe("boolean");
+        expect(typeof tool.annotations?.idempotentHint).toBe("boolean");
+        expect(typeof tool.annotations?.openWorldHint).toBe("boolean");
+      }
+
+      const byName = new Map(tools.map((t) => [t.name, t]));
+      expect(byName.get("ping")?.annotations?.readOnlyHint).toBe(true);
+      expect(byName.get("search_library")?.annotations?.readOnlyHint).toBe(true);
+      expect(byName.get("lookup_musicbrainz")?.annotations?.openWorldHint).toBe(true);
+      expect(byName.get("play_tracks")?.annotations?.destructiveHint).toBe(true);
+      expect(byName.get("create_playlist")?.annotations?.readOnlyHint).toBe(false);
+    } finally {
+      await client.close();
+      await server.close();
+      db.close();
+    }
+  });
 });
