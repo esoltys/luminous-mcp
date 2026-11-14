@@ -4,6 +4,12 @@ import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { PlaybackControlAction, PlaybackState } from "../bridge/types.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import {
+  READ_ONLY_LOCAL,
+  WRITE_DESTRUCTIVE,
+  WRITE_IDEMPOTENT,
+  WRITE_NON_IDEMPOTENT,
+} from "./annotations.ts";
 
 /**
  * Registers live playback control and transport bridge tools on the MCP server instance.
@@ -13,10 +19,15 @@ export function registerPlaybackTools(
   bridgeClient: LuminousBridgeClient,
   _db?: LuminousDatabase
 ): void {
-  server.tool(
+  server.registerTool(
     "get_playback_state",
-    "Get the live playback state and currently playing song from the active Luminous Music Player desktop instance. Returns the now playing track (title, artist, album), status (playing/paused/stopped), position, duration, volume, and shuffle/repeat modes. Use this tool whenever asked what is currently playing, what song is on, or for playback status.",
-    {},
+    {
+      title: "Get Playback State",
+      description:
+        "Get the live playback state and currently playing song from the active Luminous Music Player desktop instance. Returns the now playing track (title, artist, album), status (playing/paused/stopped), position, duration, volume, and shuffle/repeat modes. Use this tool whenever asked what is currently playing, what song is on, or for playback status.",
+      inputSchema: {},
+      annotations: READ_ONLY_LOCAL,
+    },
     async () => {
       try {
         const state = await bridgeClient.getPlaybackState();
@@ -35,10 +46,13 @@ export function registerPlaybackTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "control_playback",
-    "Control live audio playback and transport in the active Luminous Music Player desktop instance (play, pause, resume, play_pause, next/skip, previous, seek, set_volume, set_shuffle, set_repeat).",
     {
+      title: "Control Playback",
+      description:
+        "Control live audio playback and transport in the active Luminous Music Player desktop instance (play, pause, resume, play_pause, next/skip, previous, seek, set_volume, set_shuffle, set_repeat).",
+      inputSchema: {
       action: z
         .enum([
           "play",
@@ -71,6 +85,8 @@ export function registerPlaybackTools(
         .enum(["off", "all", "one"])
         .optional()
         .describe("Repeat mode ('off', 'all', 'one') (for action='set_repeat')"),
+      },
+      annotations: WRITE_NON_IDEMPOTENT,
     },
     async (params) => {
       const action = params.action as PlaybackControlAction;
@@ -162,21 +178,26 @@ export function registerPlaybackTools(
     }
   );
 
-  server.tool(
+  server.registerTool(
     "play_tracks",
-    "Replace the active Luminous playback queue with an array of track IDs and immediately begin playback.",
     {
-      track_ids: z
-        .array(z.number().int())
-        .min(1)
-        .describe("Ordered array of track IDs to load into the playback queue and play"),
-      start_index: z
-        .number()
-        .int()
-        .min(0)
-        .default(0)
-        .optional()
-        .describe("Zero-based index of the track in track_ids to begin playing (default 0)"),
+      title: "Play Tracks",
+      description:
+        "Replace the active Luminous playback queue with an array of track IDs and immediately begin playback.",
+      inputSchema: {
+        track_ids: z
+          .array(z.number().int())
+          .min(1)
+          .describe("Ordered array of track IDs to load into the playback queue and play"),
+        start_index: z
+          .number()
+          .int()
+          .min(0)
+          .default(0)
+          .optional()
+          .describe("Zero-based index of the track in track_ids to begin playing (default 0)"),
+      },
+      annotations: WRITE_DESTRUCTIVE,
     },
     async (params) => {
       try {
@@ -221,20 +242,29 @@ export function registerPlaybackTools(
     return false;
   };
 
-  server.tool(
+  server.registerTool(
     "pause_after_track",
-    "Pause or stop playback in Luminous Music Player cleanly when the current track finishes. Handles user requests like 'stop after this track', 'pause after this song', 'stop playback when this song ends', and 'stop at the beginning of the next track'. Supports action='schedule' (default) to schedule a pause, 'cancel' to cancel a pending pause, or 'status' to check if a pause is currently scheduled.",
     {
-      action: z
-        .enum(["schedule", "cancel", "status"])
-        .default("schedule")
-        .optional()
-        .describe("Action to perform: 'schedule' (default) to pause after current track, 'cancel' to cancel a pending pause, or 'status' to check if a pause is scheduled"),
-      stop_at: z
-        .enum(["next_track_start", "current_track_end"])
-        .default("next_track_start")
-        .optional()
-        .describe("Where to pause playback: 'next_track_start' (default, current song completes and next track is primed at 0:00 paused) or 'current_track_end' (pauses right at the end of the current song before advancing to the next track)"),
+      title: "Pause After Track",
+      description:
+        "Pause or stop playback in Luminous Music Player cleanly when the current track finishes. Handles user requests like 'stop after this track', 'pause after this song', 'stop playback when this song ends', and 'stop at the beginning of the next track'. Supports action='schedule' (default) to schedule a pause, 'cancel' to cancel a pending pause, or 'status' to check if a pause is currently scheduled.",
+      inputSchema: {
+        action: z
+          .enum(["schedule", "cancel", "status"])
+          .default("schedule")
+          .optional()
+          .describe(
+            "Action to perform: 'schedule' (default) to pause after current track, 'cancel' to cancel a pending pause, or 'status' to check if a pause is scheduled"
+          ),
+        stop_at: z
+          .enum(["next_track_start", "current_track_end"])
+          .default("next_track_start")
+          .optional()
+          .describe(
+            "Where to pause playback: 'next_track_start' (default, current song completes and next track is primed at 0:00 paused) or 'current_track_end' (pauses right at the end of the current song before advancing to the next track)"
+          ),
+      },
+      annotations: WRITE_IDEMPOTENT,
     },
     async (params) => {
       const action = params.action ?? "schedule";

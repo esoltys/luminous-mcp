@@ -111,16 +111,19 @@ bun run start
 
 In portable mode (a `portable` or `luminous.portable` file, or a `data/` folder, next to the Luminous executable) the library lives in `<luminous folder>/data/luminous.db`, which the server cannot discover automatically. Point it there with `LUMINOUS_DATA_DIR=<luminous folder>/data` (or `LUMINOUS_DB_PATH`).
 
-### One-Click Install (Claude Desktop)
+### One-Click Install (Claude Desktop via `.mcpb`)
 
-Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelcontextprotocol/mcpb) format:
+Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelcontextprotocol/mcpb) format (zero external dependencies; includes a self-contained binary):
 
-1. Build the bundle:
-   ```bash
-   bun run package:mcpb
-   ```
-2. Open Claude Desktop, go to **Settings > Extensions**, and drag `dist/luminous-mcp.mcpb` into the window.
-3. Click **Install**. The extension runs a self-contained binary with zero external dependencies.
+1. Download the signed `.mcpb` for your OS/architecture from [GitHub Releases](https://github.com/esoltys/luminous-mcp/releases) (or build locally with `bun run package:mcpb` to produce `dist/luminous-mcp.mcpb`).
+2. Open Claude Desktop, go to **Settings > Extensions > Advanced settings**, and click **Install Extension...** (or drag the `.mcpb` file into **Settings > Extensions**).
+3. Click **Install**.
+
+> **Note:** Anthropic deprecated standalone `.mcpb` desktop extension listings in the public Claude directory (`claude.ai/directory`). For public directory distribution, this repository also ships a Claude Plugin Bundle (`.claude-plugin/plugin.json`, `.mcp.json`, and `skills/luminous/`).
+
+### Claude Plugin Bundle (Claude Directory)
+
+This repository includes `.claude-plugin/plugin.json`, `.mcp.json`, and `skills/luminous/SKILL.md` for installation as a Claude Plugin Bundle (requires [Bun](https://bun.sh) v1.1+ on `PATH`).
 
 ### Manual Configuration (Claude Desktop, Antigravity, Cursor)
 
@@ -188,13 +191,22 @@ The `.mcpb` signature verifies the bundle archive itself; the standalone binarie
 
 ## Releasing
 
-Bump `version` in `package.json` and `SERVER_VERSION` in `src/constants.ts` (a test keeps them equal), merge to `main`, then push a matching tag:
+Bump `version` in `package.json`, `SERVER_VERSION` in `src/constants.ts`, and `version` in `.claude-plugin/plugin.json` (tests keep all three in sync), merge to `main`, then push a matching tag:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The Release workflow builds `.mcpb` bundles for Windows, macOS (arm64/x64) and Linux (x64/arm64), writes `SHA256SUMS.txt`, and attaches everything to a GitHub Release. `bun run scripts/package-mcpb.ts --target bun-linux-x64` builds a single cross-compiled bundle locally.
+The Release workflow builds `.mcpb` bundles for Windows, macOS (arm64/x64) and Linux (x64/arm64), signs them, writes `SHA256SUMS.txt` (signed with Cosign), publishes `server.json` to the official MCP Registry (`io.github.esoltys/luminous-mcp`), and attaches everything to a GitHub Release. `bun run scripts/package-mcpb.ts --target bun-linux-x64` builds a single cross-compiled bundle locally.
+
+### Publishing & Updating in the Claude Directory
+
+Because Anthropic deprecated standalone `.mcpb` directory submissions in favor of Plugin Bundles, public directory updates are managed via the Claude developer portal (`https://claude.ai/directory/manage`, requires a paid Claude plan):
+
+1. Ensure `bun run typecheck` and `bun test` pass (and optionally `claude plugin validate .` if the Claude CLI is installed).
+2. Merge the release bump to `main` and tag the release.
+3. **Initial submission:** Open `https://claude.ai/directory/manage`, choose **Submit new → Plugin bundle**, and link `https://github.com/esoltys/luminous-mcp`.
+4. **Updating an existing listing:** Directory listings pull from the linked GitHub repository; verify the updated version and validation status in `https://claude.ai/directory/manage` after merging to `main`.
 
 ## Development
 

@@ -9,15 +9,19 @@ import {
   type SearchLibraryParams,
 } from "../db/library.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { READ_ONLY_LOCAL } from "./annotations.ts";
 
 /**
  * Registers music library inspection and search tools on the MCP server instance.
  */
 export function registerLibraryTools(server: McpServer, db: LuminousDatabase): void {
-  server.tool(
+  server.registerTool(
     "list_artists",
-    "List every artist in the library (paginated), regardless of play count or year. A name counts if it appears in a track's artist or album_artist (case-insensitive). Returns canonical name, track_count and has_profile (curated profile exists) so curation gaps are one call away. Compound credits like 'A feat. B' appear as their own entry.",
     {
+      title: "List Artists",
+      description:
+        "List every artist in the library (paginated), regardless of play count or year. A name counts if it appears in a track's artist or album_artist (case-insensitive). Returns canonical name, track_count and has_profile (curated profile exists) so curation gaps are one call away. Compound credits like 'A feat. B' appear as their own entry.",
+      inputSchema: {
       has_profile: z
         .boolean()
         .optional()
@@ -43,6 +47,8 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .default(0)
         .optional()
         .describe("Pagination offset (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -73,10 +79,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
     }
   );
 
-  server.tool(
+  server.registerTool(
     "search_library",
-    "Search music library tracks with full-text search (matching title, artist, album, composer, performer, genre, or lyrics) and structured filters (artist, album, genre, composer, release year, BPM tempo, EBU R128 LUFS loudness).",
     {
+      title: "Search Library",
+      description:
+        "Search music library tracks with full-text search (matching title, artist, album, composer, performer, genre, or lyrics) and structured filters (artist, album, genre, composer, release year, BPM tempo, EBU R128 LUFS loudness).",
+      inputSchema: {
       query: z
         .string()
         .optional()
@@ -121,6 +130,8 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .describe(
           "Granularity of track details: 'compact' (default) returns essential fields (id, title, artist, album, year, duration_seconds); 'full' returns all metadata including composer, performer, genre, track/disc, bpm, loudness, and play counts."
         ),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -171,10 +182,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_track_details",
-    "Get comprehensive metadata, technical audio specs, acoustic measurements, lyrics, MusicBrainz IDs, and playback statistics for a single track.",
     {
+      title: "Get Track Details",
+      description:
+        "Get comprehensive metadata, technical audio specs, acoustic measurements, lyrics, MusicBrainz IDs, and playback statistics for a single track.",
+      inputSchema: {
       track_id: z
         .number()
         .int()
@@ -186,6 +200,8 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .describe(
           "Whether to include the full lyrics text in the response (default false to save tokens). Set to true only if lyrics are specifically needed."
         ),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
@@ -233,10 +249,13 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
     }
   );
 
-  server.tool(
+  server.registerTool(
     "get_artist_summary",
-    "Get a comprehensive summary of an artist in the local library, including total tracks, albums, genres, collaborators, composers, performers/producers, and listening statistics.",
     {
+      title: "Get Artist Summary",
+      description:
+        "Get a comprehensive summary of an artist in the local library, including total tracks, albums, genres, collaborators, composers, performers/producers, and listening statistics.",
+      inputSchema: {
       artist: z.string().describe("Artist name to look up in the library"),
       max_associated_entities: z
         .number()
@@ -248,6 +267,8 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
         .describe(
           "Maximum number of collaborators, composers, and producers to return in list arrays (default 20, max 100). Total counts are always returned."
         ),
+      },
+      annotations: READ_ONLY_LOCAL,
     },
     async (params) => {
       if (!db.exists()) {
