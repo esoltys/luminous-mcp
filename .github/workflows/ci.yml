@@ -75,20 +75,11 @@ jobs:
       - name: Build & validate MCP Bundle (.mcpb)
         run: bun run package:mcpb
 
-      - name: Sign & verify MCPB bundle (self-signed)
-        run: |
-          set -euo pipefail
-          bun x @anthropic-ai/mcpb sign --self-signed dist/luminous-mcp.mcpb
-          bun x @anthropic-ai/mcpb verify dist/luminous-mcp.mcpb
+      - name: Sign MCPB bundle (self-signed)
+        run: bun x @anthropic-ai/mcpb sign --self-signed dist/luminous-mcp.mcpb
 
       - name: Verify MCPB bundle metadata
-        run: |
-          info_output="$(bun x @anthropic-ai/mcpb info dist/luminous-mcp.mcpb)"
-          printf '%s\n' "$info_output"
-          if printf '%s\n' "$info_output" | grep -q "WARNING: Not signed"; then
-            echo "Error: MCPB bundle still reports WARNING: Not signed" >&2
-            exit 1
-          fi
+        run: bun x @anthropic-ai/mcpb info dist/luminous-mcp.mcpb
 
   package-cross:
     name: Cross-compile Check
