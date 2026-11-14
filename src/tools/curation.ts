@@ -516,6 +516,7 @@ export function registerCurationTools(
     "Get an album's curated profile (description/liner notes with cited sources, official website, tags, external source/review links, and MusicBrainz release-group context enrichment).",
     {
       album: z.string().optional().describe("Album title to inspect"),
+      artist: z.string().optional().describe("Optional artist name to disambiguate albums sharing the same title"),
       release_group_id: z.string().optional().describe("MusicBrainz release group UUID"),
     },
     async (params) => {
@@ -547,6 +548,7 @@ export function registerCurationTools(
         const handle = db.getHandle();
         const profile = getAlbumProfile(handle, {
           album: params.album,
+          artist: params.artist,
           release_group_id: params.release_group_id,
         });
 

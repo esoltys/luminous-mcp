@@ -34,8 +34,17 @@ describe("Album Identity & Folded Keys (albumKey)", () => {
     expect(sameAlbum("  Songs of the Sea \t", "Songs Of The Sea")).toBe(true);
     expect(sameAlbum("Élan", "ÉLAN")).toBe(true);
     expect(sameAlbum("Album A", "Album B")).toBe(false);
-    expect(sameAlbum(null, undefined)).toBe(true);
-    expect(sameAlbum("   ", "")).toBe(true);
+    expect(sameAlbum(null, undefined)).toBe(false);
+    expect(sameAlbum("   ", "")).toBe(false);
+  });
+
+  it("supports composite (artist, album) keys and Various Artists normalization", () => {
+    expect(albumKey("Greatest Hits", "Queen")).toBe("queen\u{1f}greatest hits");
+    expect(albumKey("Greatest Hits", "Various Artists")).toBe("[va]\u{1f}greatest hits");
+    expect(albumKey("Compilation", "Someone", true)).toBe("[va]\u{1f}compilation");
+    expect(sameAlbum("queen\u{1f}greatest hits", "Queen\u{1f}Greatest Hits")).toBe(true);
+    expect(sameAlbum("queen\u{1f}greatest hits", "abba\u{1f}greatest hits")).toBe(false);
+    expect(sameAlbum("queen\u{1f}greatest hits", "greatest hits")).toBe(true);
   });
 });
 
@@ -155,6 +164,46 @@ describe("Database Folded Keys (Schema 62+ vs Legacy)", () => {
         )
         .get(1);
       expect(row?.album).toBe("  Élan  ");
+      expect(row?.album_key).toBe("nightwish\u{1f}élan");
+
+      db.close();
+    });
+
+    it("recomputes composite album_key when artist or album_artist changes", () => {
+      const db = setupDb(true);
+      db.run(
+        "INSERT INTO songs (id, title, artist, album, album_key) VALUES (1, 'Track 1', 'Old Artist', 'Shared Album', 'old artist\u{1f}shared album');"
+      );
+
+      updateTrackMetadata(db, {
+        track_id: 1,
+        album_artist: "New Album Artist",
+      });
+
+      const row = db
+        .query<{ album_key: string }, [number]>("SELECT album_key FROM songs WHERE id = ?1")
+        .get(1);
+      expect(row?.album_key).toBe("new album artist\u{1f}shared album");
+
+      db.close();
+    });
+
+    it("preserves bare album_key on schema v62-v72 databases", () => {
+      const db = setupDb(true);
+      db.run("DELETE FROM schema_version;");
+      db.run("INSERT INTO schema_version (version) VALUES (62);");
+      db.run(
+        "INSERT INTO songs (id, title, artist, album, album_key) VALUES (1, 'Track 1', 'Nightwish', 'Old Album', 'old album');"
+      );
+
+      updateTrackMetadata(db, {
+        track_id: 1,
+        album: "  Élan  ",
+      });
+
+      const row = db
+        .query<{ album_key: string }, [number]>("SELECT album_key FROM songs WHERE id = ?1")
+        .get(1);
       expect(row?.album_key).toBe("élan");
 
       db.close();
@@ -287,15 +336,44 @@ describe("Database Folded Keys (Schema 62+ vs Legacy)", () => {
       expect(result.album).toBe("Songs of the Sea"); // Must be display title!
       expect(result.profile.album).toBe("Songs of the Sea"); // Must be display title!
 
-      // Verify row in album_profiles has folded key
+      // Verify row in album_profiles has composite key
       const row = db
         .query<{ album_key: string; description: string }, [string]>(
           "SELECT album_key, description FROM album_profiles WHERE album_key = ?1"
         )
-        .get("songs of the sea");
+        .get("nightwish\u{1f}songs of the sea");
       expect(row).not.toBeNull();
-      expect(row?.album_key).toBe("songs of the sea");
+      expect(row?.album_key).toBe("nightwish\u{1f}songs of the sea");
       expect(row?.description).toBe("Official album notes");
+
+      db.close();
+    });
+
+    it("disambiguates albums with identical titles across different artists", () => {
+      const db = setupDb(true);
+      db.run(
+        "INSERT INTO songs (id, title, artist, album, album_key) VALUES (1, 'Track 1', 'Artist A', 'Greatest Hits', 'artist a\u{1f}greatest hits');"
+      );
+      db.run(
+        "INSERT INTO songs (id, title, artist, album, album_key) VALUES (2, 'Track 2', 'Artist B', 'Greatest Hits', 'artist b\u{1f}greatest hits');"
+      );
+
+      updateAlbumProfile(db, {
+        album: "Greatest Hits",
+        artist: "Artist A",
+        description: "Notes for Artist A",
+      });
+      updateAlbumProfile(db, {
+        album: "Greatest Hits",
+        artist: "Artist B",
+        description: "Notes for Artist B",
+      });
+
+      const profileA = getAlbumProfile(db, { album: "Greatest Hits", artist: "Artist A" });
+      const profileB = getAlbumProfile(db, { album: "Greatest Hits", artist: "Artist B" });
+
+      expect(profileA?.description).toBe("Notes for Artist A");
+      expect(profileB?.description).toBe("Notes for Artist B");
 
       db.close();
     });

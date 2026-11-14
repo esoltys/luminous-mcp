@@ -5,7 +5,14 @@ export const SERVER_VERSION = "1.0.1";
  * Current database schema version supported by this server,
  * matching Luminous Music Player's CURRENT_SCHEMA_VERSION.
  */
-export const KNOWN_SCHEMA_VERSION = 62;
+export const KNOWN_SCHEMA_VERSION = 82;
+
+/**
+ * SongSource discriminant for files opened directly from outside watched folders
+ * (Luminous schema v72, #1842). Excluded from browsable library queries, but
+ * included in listening history and stats.
+ */
+export const OPENED_FILE_SOURCE_ID = 12;
 
 /**
  * Database filename within the app data directory.

@@ -1,7 +1,13 @@
 import type { Database } from "bun:sqlite";
-import { albumKey, sameAlbum } from "../utils/albumKey.ts";
+import {
+  albumKey,
+  albumKeyForTrack,
+  isCompositeAlbumKey,
+  sameAlbum,
+} from "../utils/albumKey.ts";
+import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
-export { albumKey, sameAlbum };
+export { albumKey, albumKeyForTrack, hasColumn, hasTable, sameAlbum };
 
 export type MissingMetadataField =
   | "year"
@@ -239,34 +245,6 @@ export interface LookupMusicBrainzResult {
 }
 
 /**
- * Checks if a table or virtual table exists in the SQLite database.
- */
-export function hasTable(db: Database, tableName: string): boolean {
-  try {
-    const row = db
-      .query<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?"
-      )
-      .get(tableName);
-    return (row?.count ?? 0) > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Checks if a column exists in a given table in the SQLite database.
- */
-export function hasColumn(db: Database, tableName: string, columnName: string): boolean {
-  try {
-    const columns = db.query<{ name: string }, []>(`PRAGMA table_info(${tableName})`).all();
-    return columns.some((col) => col.name.toLowerCase() === columnName.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Extracts structured citation links from biography or description text.
  * Parses both Markdown-style links [Title](https://...) and bare URLs (https://...).
  */
@@ -404,7 +382,7 @@ export function auditMetadata(
           NOT ${MISSING_EXPRESSIONS.loudness}
         ) THEN 1 ELSE 0 END), 0) AS clean_tracks_count
       FROM songs
-      WHERE unavailable = 0`
+      WHERE ${librarySongWhere(db)}`
     )
     .get();
 
@@ -420,7 +398,7 @@ export function auditMetadata(
   };
 
   // 2. Build where clauses for paginated sample tracks
-  const whereClauses: string[] = ["unavailable = 0"];
+  const whereClauses: string[] = [librarySongWhere(db)];
   const queryParams: Record<string, unknown> = {};
 
   if (options.artist && options.artist.trim() !== "") {
@@ -618,7 +596,7 @@ export function getGenreHierarchy(
     }
     const genreRows = db
       .query<GenreRow, []>(
-        "SELECT DISTINCT genre FROM songs WHERE unavailable = 0 AND genre IS NOT NULL AND trim(genre) != ''"
+        `SELECT DISTINCT genre FROM songs WHERE ${librarySongWhere(db)} AND genre IS NOT NULL AND trim(genre) != ''`
       )
       .all();
 
@@ -692,6 +670,13 @@ export function updateTrackMetadata(
   const fieldsToUpdate: Record<string, unknown> = {};
   const setClauses: string[] = [];
   const hasAlbumKeyCol = hasColumn(db, "songs", "album_key");
+  const hasAlbumArtistCol = hasColumn(db, "songs", "album_artist");
+  const hasCompilationCol = hasColumn(db, "songs", "compilation");
+  const recomputesAlbumKey =
+    hasAlbumKeyCol &&
+    (params.album !== undefined ||
+      params.artist !== undefined ||
+      params.album_artist !== undefined);
 
   if (params.genre !== undefined) {
     fieldsToUpdate.genre = params.genre;
@@ -715,11 +700,7 @@ export function updateTrackMetadata(
   }
   if (params.album !== undefined) {
     fieldsToUpdate.album = params.album;
-    if (hasAlbumKeyCol) {
-      setClauses.push("album = $album, album_key = $album_key");
-    } else {
-      setClauses.push("album = $album");
-    }
+    setClauses.push("album = $album");
   }
   if (params.album_artist !== undefined) {
     fieldsToUpdate.album_artist = params.album_artist;
@@ -736,20 +717,39 @@ export function updateTrackMetadata(
     );
   }
 
-  // Verify all track IDs exist
+  if (recomputesAlbumKey) {
+    setClauses.push("album_key = $album_key");
+  }
+
+  // Verify all track IDs exist (and fetch current fields needed for composite album_key)
   const placeholders = ids.map(() => "?").join(",");
+  const selectAlbumArtist = hasAlbumArtistCol ? ", album_artist" : ", NULL AS album_artist";
+  const selectCompilation = hasCompilationCol ? ", compilation" : ", 0 AS compilation";
   const existingRows = db
-    .query<{ id: number; title: string | null; artist: string | null; album: string | null; path: string | null }, number[]>(
-      `SELECT id, title, artist, album, path FROM songs WHERE id IN (${placeholders})`
+    .query<
+      {
+        id: number;
+        title: string | null;
+        artist: string | null;
+        album: string | null;
+        album_artist: string | null;
+        compilation: number | null;
+        path: string | null;
+      },
+      number[]
+    >(
+      `SELECT id, title, artist, album${selectAlbumArtist}${selectCompilation}, path FROM songs WHERE id IN (${placeholders})`
     )
     .all(...ids);
 
-  const existingIdSet = new Set(existingRows.map((r) => r.id));
-  const missingIds = ids.filter((id) => !existingIdSet.has(id));
+  const existingById = new Map(existingRows.map((r) => [r.id, r]));
+  const missingIds = ids.filter((id) => !existingById.has(id));
 
   if (missingIds.length > 0) {
     throw new Error(`Track ID(s) not found in library: ${missingIds.join(", ")}`);
   }
+
+  const compositeKeys = recomputesAlbumKey ? usesCompositeAlbumKeys(db) : false;
 
   // Execute update inside transaction
   const updateSql = `UPDATE songs SET ${setClauses.join(", ")} WHERE id = $id`;
@@ -765,15 +765,26 @@ export function updateTrackMetadata(
       if (params.composer !== undefined) bindParams.$composer = params.composer;
       if (params.title !== undefined) bindParams.$title = params.title;
       if (params.artist !== undefined) bindParams.$artist = params.artist;
-      if (params.album !== undefined) {
-        bindParams.$album = params.album;
-        if (hasAlbumKeyCol) {
-          const foldedKey = albumKey(params.album);
-          bindParams.$album_key = foldedKey !== "" ? foldedKey : null;
-        }
-      }
+      if (params.album !== undefined) bindParams.$album = params.album;
       if (params.album_artist !== undefined) bindParams.$album_artist = params.album_artist;
       if (params.lyrics !== undefined) bindParams.$lyrics = params.lyrics;
+
+      if (recomputesAlbumKey) {
+        const prev = existingById.get(id)!;
+        const nextAlbum = params.album !== undefined ? params.album : prev.album;
+        const nextArtist = params.artist !== undefined ? params.artist : prev.artist;
+        const nextAlbumArtist =
+          params.album_artist !== undefined ? params.album_artist : prev.album_artist;
+        const nextKey = compositeKeys
+          ? albumKeyForTrack(
+              nextAlbum,
+              nextAlbumArtist,
+              nextArtist,
+              Boolean(prev.compilation)
+            )
+          : albumKey(nextAlbum);
+        bindParams.$album_key = nextKey !== "" ? nextKey : null;
+      }
 
       updateStmt.run(bindParams as any);
     }
@@ -1092,14 +1103,170 @@ interface RawAlbumProfile {
 }
 
 /**
+ * Determines whether the database uses composite `(artist, album)` album keys
+ * (Luminous schema v73+) rather than legacy bare folded album titles (v62-v72).
+ */
+function usesCompositeAlbumKeys(db: Database): boolean {
+  if (hasTable(db, "schema_version")) {
+    try {
+      const row = db
+        .query<{ v: number }, []>("SELECT COALESCE(MAX(version), 0) AS v FROM schema_version")
+        .get();
+      if (row && row.v > 0) {
+        return row.v >= 73;
+      }
+    } catch {
+      // Fall through to data inspection
+    }
+  }
+  if (hasTable(db, "songs") && hasColumn(db, "songs", "album_key")) {
+    const sample = db
+      .query<{ k: string }, []>("SELECT album_key AS k FROM songs WHERE album_key IS NOT NULL LIMIT 1")
+      .get();
+    if (sample?.k) {
+      return isCompositeAlbumKey(sample.k);
+    }
+  }
+  return true;
+}
+
+interface ResolvedAlbumSong {
+  album: string;
+  album_key: string | null;
+  album_artist: string | null;
+  artist: string | null;
+  musicbrainz_release_group_id?: string | null;
+}
+
+/**
+ * Finds the dominant display spelling and composite key for an album in `songs`.
+ * When `artistName` is provided on a composite-key schema, matches that release
+ * specifically; otherwise matches either exact key or composite suffix.
+ */
+function findSongForAlbum(
+  db: Database,
+  albumName: string,
+  artistName: string | null | undefined,
+  hasAlbumKeyCol: boolean,
+  compositeKeys: boolean,
+  includeMbRg: boolean
+): ResolvedAlbumSong | null {
+  const mbCol = includeMbRg ? ", MAX(musicbrainz_release_group_id) AS musicbrainz_release_group_id" : "";
+  const bareKey = albumKey(albumName);
+
+  if (hasAlbumKeyCol) {
+    if (compositeKeys && artistName && artistName.trim() !== "") {
+      const compKey = albumKey(albumName, artistName);
+      const row = db
+        .query<ResolvedAlbumSong, [string, string]>(
+          `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
+           FROM songs
+           WHERE album_key = ?1 OR album_key = ?2
+           GROUP BY album
+           ORDER BY CASE WHEN MAX(album_key) = ?1 THEN 0 ELSE 1 END, COUNT(*) DESC, album
+           LIMIT 1`
+        )
+        .get(compKey, bareKey);
+      if (row) return row;
+    }
+
+    if (compositeKeys) {
+      const row = db
+        .query<ResolvedAlbumSong, [string]>(
+          `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
+           FROM songs
+           WHERE album_key = ?1 OR substr(album_key, -(length(?1) + 1)) = char(31) || ?1
+           GROUP BY album
+           ORDER BY COUNT(*) DESC, album
+           LIMIT 1`
+        )
+        .get(bareKey);
+      if (row) return row;
+    }
+
+    return db
+      .query<ResolvedAlbumSong, [string]>(
+        `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
+         FROM songs
+         WHERE album_key = ?1
+         GROUP BY album
+         ORDER BY COUNT(*) DESC, album
+         LIMIT 1`
+      )
+      .get(bareKey);
+  }
+
+  const mbSelect = includeMbRg ? ", musicbrainz_release_group_id" : "";
+  if (artistName && artistName.trim() !== "") {
+    const row = db
+      .query<ResolvedAlbumSong, [string, string]>(
+        `SELECT album, NULL AS album_key, album_artist, artist${mbSelect}
+         FROM songs
+         WHERE album = ?1 COLLATE NOCASE
+           AND (album_artist = ?2 COLLATE NOCASE OR artist = ?2 COLLATE NOCASE)
+         LIMIT 1`
+      )
+      .get(albumName, artistName.trim());
+    if (row) return row;
+  }
+
+  return db
+    .query<ResolvedAlbumSong, [string]>(
+      `SELECT album, NULL AS album_key, album_artist, artist${mbSelect}
+       FROM songs
+       WHERE album = ?1 COLLATE NOCASE
+       LIMIT 1`
+    )
+    .get(albumName);
+}
+
+/**
+ * Looks up an `album_profiles` row by candidate keys (most specific first),
+ * falling back to composite-key suffix matching when `artist` is unknown.
+ */
+function findExistingAlbumProfile(
+  db: Database,
+  albumName: string,
+  candidateKeys: string[],
+  allowCompositeSuffix: boolean
+): RawAlbumProfile | null {
+  for (const key of candidateKeys) {
+    if (!key) continue;
+    const row = db
+      .query<RawAlbumProfile, [string]>(
+        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1"
+      )
+      .get(key);
+    if (row) return row;
+  }
+
+  const bareKey = albumKey(albumName);
+  if (allowCompositeSuffix && bareKey) {
+    const suffixRow = db
+      .query<RawAlbumProfile, [string]>(
+        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE substr(album_key, -(length(?1) + 1)) = char(31) || ?1 LIMIT 1"
+      )
+      .get(bareKey);
+    if (suffixRow) return suffixRow;
+  }
+
+  return db
+    .query<RawAlbumProfile, [string]>(
+      "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE LIMIT 1"
+    )
+    .get(albumName);
+}
+
+/**
  * Retrieves an album's curated profile (description, website, tags, links/sources)
  * and MusicBrainz release-group context enrichment from the database.
  */
 export function getAlbumProfile(
   db: Database,
-  options: { album?: string; release_group_id?: string }
+  options: { album?: string; artist?: string; release_group_id?: string }
 ): AlbumProfile | null {
   const albumName = options.album?.trim();
+  const artistName = options.artist?.trim() || null;
   let releaseGroupMbid = options.release_group_id?.trim() ?? null;
 
   if (!albumName && !releaseGroupMbid) {
@@ -1107,72 +1274,72 @@ export function getAlbumProfile(
   }
 
   let resolvedAlbumName = albumName ?? "";
-  let resolvedArtistName: string | null = null;
+  let resolvedArtistName: string | null = artistName;
+  let resolvedSongAlbumKey: string | null = null;
   let songFound = false;
 
   const hasSongsTable = hasTable(db, "songs");
   const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
+  const compositeKeys = usesCompositeAlbumKeys(db);
 
   if (hasSongsTable) {
     if (albumName && !releaseGroupMbid) {
       const hasMbRg = hasColumn(db, "songs", "musicbrainz_release_group_id");
-      let querySql: string;
-      let queryParam: string;
-
-      if (hasAlbumKeyCol) {
-        const mbCol = hasMbRg
-          ? ", MAX(musicbrainz_release_group_id) AS musicbrainz_release_group_id"
-          : "";
-        // Mirrors Luminous album_display_sql: picks the most common spelling in the library, with binary tiebreaker
-        querySql = `SELECT album, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol} FROM songs WHERE album_key = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1`;
-        queryParam = albumKey(albumName);
-      } else {
-        querySql = hasMbRg
-          ? "SELECT album, album_artist, artist, musicbrainz_release_group_id FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1"
-          : "SELECT album, album_artist, artist FROM songs WHERE album = ?1 COLLATE NOCASE LIMIT 1";
-        queryParam = albumName;
-      }
-
-      const songRow = db.query<any, [string]>(querySql).get(queryParam);
+      const songRow = findSongForAlbum(
+        db,
+        albumName,
+        artistName,
+        hasAlbumKeyCol,
+        compositeKeys,
+        hasMbRg
+      );
       if (songRow) {
         songFound = true;
         resolvedAlbumName = songRow.album ?? albumName;
-        resolvedArtistName = songRow.album_artist || songRow.artist || null;
+        resolvedArtistName = songRow.album_artist || songRow.artist || artistName;
+        resolvedSongAlbumKey = songRow.album_key ?? null;
         if (songRow.musicbrainz_release_group_id) {
           releaseGroupMbid = songRow.musicbrainz_release_group_id;
         }
       }
     } else if (releaseGroupMbid && !albumName) {
       if (hasColumn(db, "songs", "musicbrainz_release_group_id")) {
+        const keySelect = hasAlbumKeyCol ? ", MAX(album_key) AS album_key" : ", NULL AS album_key";
         const querySql = hasAlbumKeyCol
-          ? "SELECT album, MAX(album_artist) AS album_artist, MAX(artist) AS artist FROM songs WHERE musicbrainz_release_group_id = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1"
-          : "SELECT album, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1";
-        const songRow = db.query<any, [string]>(querySql).get(releaseGroupMbid);
+          ? `SELECT album${keySelect}, MAX(album_artist) AS album_artist, MAX(artist) AS artist FROM songs WHERE musicbrainz_release_group_id = ?1 GROUP BY album ORDER BY COUNT(*) DESC, album LIMIT 1`
+          : "SELECT album, NULL AS album_key, album_artist, artist FROM songs WHERE musicbrainz_release_group_id = ?1 LIMIT 1";
+        const songRow = db.query<ResolvedAlbumSong, [string]>(querySql).get(releaseGroupMbid);
         if (songRow && songRow.album) {
           songFound = true;
           resolvedAlbumName = songRow.album;
           resolvedArtistName = songRow.album_artist || songRow.artist || null;
+          resolvedSongAlbumKey = songRow.album_key ?? null;
         }
       }
     }
   }
 
   let rawProfile: RawAlbumProfile | null = null;
-  if (hasTable(db, "album_profiles")) {
-    if (resolvedAlbumName) {
-      if (hasAlbumKeyCol) {
-        rawProfile = db
-          .query<RawAlbumProfile, [string, string]>(
-            "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 OR album_key = ?2 COLLATE NOCASE ORDER BY CASE WHEN album_key = ?1 THEN 0 ELSE 1 END LIMIT 1"
-          )
-          .get(albumKey(resolvedAlbumName), resolvedAlbumName);
-      } else {
-        rawProfile = db
-          .query<RawAlbumProfile, [string]>(
-            "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
-          )
-          .get(resolvedAlbumName);
+  if (hasTable(db, "album_profiles") && resolvedAlbumName) {
+    if (hasAlbumKeyCol) {
+      const candidates: string[] = [];
+      if (resolvedSongAlbumKey) candidates.push(resolvedSongAlbumKey);
+      if (compositeKeys && artistName) {
+        candidates.push(albumKey(resolvedAlbumName, artistName));
       }
+      candidates.push(albumKey(resolvedAlbumName));
+      rawProfile = findExistingAlbumProfile(
+        db,
+        resolvedAlbumName,
+        candidates,
+        compositeKeys && !artistName
+      );
+    } else {
+      rawProfile = db
+        .query<RawAlbumProfile, [string]>(
+          "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+        )
+        .get(resolvedAlbumName);
     }
   }
 
@@ -1304,17 +1471,34 @@ export function updateAlbumProfile(
   // Check existing row
   const hasSongsTable = hasTable(db, "songs");
   const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
+  const compositeKeys = usesCompositeAlbumKeys(db);
 
   let existing: RawAlbumProfile | null = null;
   let keyToUse: string;
 
   if (hasAlbumKeyCol) {
-    keyToUse = albumKey(albumName);
-    existing = db
-      .query<RawAlbumProfile, [string, string]>(
-        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 OR album_key = ?2 COLLATE NOCASE ORDER BY CASE WHEN album_key = ?1 THEN 0 ELSE 1 END LIMIT 1"
-      )
-      .get(keyToUse, albumName);
+    const songMatch = hasSongsTable
+      ? findSongForAlbum(db, albumName, params.artist, true, compositeKeys, false)
+      : null;
+
+    if (compositeKeys) {
+      keyToUse = params.artist?.trim()
+        ? albumKey(albumName, params.artist)
+        : (songMatch?.album_key ?? albumKey(albumName));
+    } else {
+      keyToUse = albumKey(albumName);
+    }
+
+    const candidates = [keyToUse, albumKey(albumName)];
+    existing = findExistingAlbumProfile(
+      db,
+      albumName,
+      candidates,
+      compositeKeys && !params.artist?.trim()
+    );
+    if (existing && !params.artist?.trim() && !songMatch?.album_key) {
+      keyToUse = existing.album_key;
+    }
   } else {
     existing = db
       .query<RawAlbumProfile, [string]>(
@@ -1352,8 +1536,11 @@ export function updateAlbumProfile(
     [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
   );
 
-  // Query using albumName so getAlbumProfile resolves the dominant library display title
-  const updatedProfile = getAlbumProfile(db, { album: albumName })!;
+  // Query using albumName (and artist when available) so getAlbumProfile resolves the exact profile
+  const updatedProfile = getAlbumProfile(db, {
+    album: albumName,
+    artist: newArtist ?? undefined,
+  })!;
 
   return {
     success: true,
