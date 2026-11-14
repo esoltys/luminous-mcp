@@ -126,7 +126,7 @@ export function sameAlbum(
   const artA = extractAlbumArtist(keyA);
   const artB = extractAlbumArtist(keyB);
   if (artA !== null && artB !== null) {
-    return artA === artB && extractAlbumTitle(keyA) === extractAlbumTitle(keyB);
+    return false;
   }
   return extractAlbumTitle(keyA) === extractAlbumTitle(keyB);
 }

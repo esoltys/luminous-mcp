@@ -36,9 +36,12 @@ export function hasColumn(db: Database, tableName: string, columnName: string): 
  */
 export function librarySongWhere(db: Database, alias?: string): string {
   const prefix = alias ? `${alias}.` : "";
-  const base = `${prefix}unavailable = 0`;
-  if (hasColumn(db, "songs", "source")) {
-    return `${base} AND COALESCE(${prefix}source, 0) != ${OPENED_FILE_SOURCE_ID}`;
+  const clauses: string[] = [];
+  if (hasColumn(db, "songs", "unavailable")) {
+    clauses.push(`${prefix}unavailable = 0`);
   }
-  return base;
+  if (hasColumn(db, "songs", "source")) {
+    clauses.push(`COALESCE(${prefix}source, 0) != ${OPENED_FILE_SOURCE_ID}`);
+  }
+  return clauses.length > 0 ? clauses.join(" AND ") : "1 = 1";
 }

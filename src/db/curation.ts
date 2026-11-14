@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
+  ALBUM_KEY_SEPARATOR,
   albumKey,
   albumKeyForTrack,
   isCompositeAlbumKey,
@@ -1139,6 +1140,14 @@ interface ResolvedAlbumSong {
 }
 
 /**
+ * SQL predicate matching a composite `album_key` ending in `{sep}{bareKey}`.
+ */
+function compositeSuffixPredicate(column: string, param: string): string {
+  const sepCode = ALBUM_KEY_SEPARATOR.charCodeAt(0);
+  return `substr(${column}, -(length(${param}) + 1)) = char(${sepCode}) || ${param}`;
+}
+
+/**
  * Finds the dominant display spelling and composite key for an album in `songs`.
  * When `artistName` is provided on a composite-key schema, matches that release
  * specifically; otherwise matches either exact key or composite suffix.
@@ -1153,6 +1162,7 @@ function findSongForAlbum(
 ): ResolvedAlbumSong | null {
   const mbCol = includeMbRg ? ", MAX(musicbrainz_release_group_id) AS musicbrainz_release_group_id" : "";
   const bareKey = albumKey(albumName);
+  const libFilter = librarySongWhere(db);
 
   if (hasAlbumKeyCol) {
     if (compositeKeys && artistName && artistName.trim() !== "") {
@@ -1161,7 +1171,7 @@ function findSongForAlbum(
         .query<ResolvedAlbumSong, [string, string]>(
           `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
            FROM songs
-           WHERE album_key = ?1 OR album_key = ?2
+           WHERE (album_key = ?1 OR album_key = ?2) AND ${libFilter}
            GROUP BY album
            ORDER BY CASE WHEN MAX(album_key) = ?1 THEN 0 ELSE 1 END, COUNT(*) DESC, album
            LIMIT 1`
@@ -1175,7 +1185,7 @@ function findSongForAlbum(
         .query<ResolvedAlbumSong, [string]>(
           `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
            FROM songs
-           WHERE album_key = ?1 OR substr(album_key, -(length(?1) + 1)) = char(31) || ?1
+           WHERE (album_key = ?1 OR ${compositeSuffixPredicate("album_key", "?1")}) AND ${libFilter}
            GROUP BY album
            ORDER BY COUNT(*) DESC, album
            LIMIT 1`
@@ -1188,7 +1198,7 @@ function findSongForAlbum(
       .query<ResolvedAlbumSong, [string]>(
         `SELECT album, MAX(album_key) AS album_key, MAX(album_artist) AS album_artist, MAX(artist) AS artist${mbCol}
          FROM songs
-         WHERE album_key = ?1
+         WHERE album_key = ?1 AND ${libFilter}
          GROUP BY album
          ORDER BY COUNT(*) DESC, album
          LIMIT 1`
@@ -1204,6 +1214,7 @@ function findSongForAlbum(
          FROM songs
          WHERE album = ?1 COLLATE NOCASE
            AND (album_artist = ?2 COLLATE NOCASE OR artist = ?2 COLLATE NOCASE)
+           AND ${libFilter}
          LIMIT 1`
       )
       .get(albumName, artistName.trim());
@@ -1214,7 +1225,7 @@ function findSongForAlbum(
     .query<ResolvedAlbumSong, [string]>(
       `SELECT album, NULL AS album_key, album_artist, artist${mbSelect}
        FROM songs
-       WHERE album = ?1 COLLATE NOCASE
+       WHERE album = ?1 COLLATE NOCASE AND ${libFilter}
        LIMIT 1`
     )
     .get(albumName);
@@ -1244,7 +1255,7 @@ function findExistingAlbumProfile(
   if (allowCompositeSuffix && bareKey) {
     const suffixRow = db
       .query<RawAlbumProfile, [string]>(
-        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE substr(album_key, -(length(?1) + 1)) = char(31) || ?1 LIMIT 1"
+        `SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE ${compositeSuffixPredicate("album_key", "?1")} LIMIT 1`
       )
       .get(bareKey);
     if (suffixRow) return suffixRow;

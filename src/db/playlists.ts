@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { hasTable } from "./filters.ts";
 
 /**
  * Reserved playlist names in Luminous Music Player.
@@ -93,19 +94,6 @@ export interface AddTracksResult {
   tracks_added: number;
   total_tracks: number;
   track_ids: number[];
-}
-
-function hasTable(db: Database, tableName: string): boolean {
-  try {
-    const row = db
-      .query<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name=?1"
-      )
-      .get(tableName);
-    return (row?.count ?? 0) > 0;
-  } catch {
-    return false;
-  }
 }
 
 function toIsoString(timestampSeconds: number | null | undefined): string | null {
