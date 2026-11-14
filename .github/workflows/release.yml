@@ -47,6 +47,49 @@ jobs:
             bun run scripts/package-mcpb.ts --target "$target"
           done
 
+      # Sign before generating SHA256SUMS.txt because `mcpb sign` modifies the .mcpb archive in-place.
+      # Requires MCPB_SIGNING_CERT and MCPB_SIGNING_KEY (PEM) secrets on tagged releases;
+      # optional MCPB_INTERMEDIATE_CERTS (PEM) is passed via -i when configured.
+      - name: Sign & verify MCP Bundles
+        env:
+          MCPB_SIGNING_CERT: ${{ secrets.MCPB_SIGNING_CERT }}
+          MCPB_SIGNING_KEY: ${{ secrets.MCPB_SIGNING_KEY }}
+          MCPB_INTERMEDIATE_CERTS: ${{ secrets.MCPB_INTERMEDIATE_CERTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cert_file="${RUNNER_TEMP}/mcpb-cert.pem"
+          key_file="${RUNNER_TEMP}/mcpb-key.pem"
+          inter_file="${RUNNER_TEMP}/mcpb-intermediate.pem"
+          cleanup() {
+            rm -f "$cert_file" "$key_file" "$inter_file"
+          }
+          trap cleanup EXIT
+
+          sign_args=()
+          if [ -n "${MCPB_SIGNING_CERT:-}" ] && [ -n "${MCPB_SIGNING_KEY:-}" ]; then
+            printf '%s\n' "$MCPB_SIGNING_CERT" > "$cert_file"
+            printf '%s\n' "$MCPB_SIGNING_KEY" > "$key_file"
+            sign_args=(-c "$cert_file" -k "$key_file")
+            if [ -n "${MCPB_INTERMEDIATE_CERTS:-}" ]; then
+              printf '%s\n' "$MCPB_INTERMEDIATE_CERTS" > "$inter_file"
+              sign_args+=(-i "$inter_file")
+            fi
+          elif [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            echo "Error: MCPB_SIGNING_CERT and MCPB_SIGNING_KEY secrets must be configured for tag releases." >&2
+            exit 1
+          else
+            echo "::notice::MCPB_SIGNING_CERT/MCPB_SIGNING_KEY not set; signing dry-run bundles with a temporary self-signed certificate."
+            sign_args=(--self-signed)
+          fi
+
+          for bundle in dist/luminous-mcp-*.mcpb; do
+            bun x @anthropic-ai/mcpb sign "${sign_args[@]}" "$bundle"
+            # `mcpb verify` validates against the OS trust store, so self-signed certs
+            # report untrusted even though the PKCS#7 signature is embedded.
+            bun x @anthropic-ai/mcpb verify "$bundle" || echo "::warning::mcpb verify could not chain $bundle to the runner OS trust store"
+          done
+
       - name: Generate checksums
         working-directory: dist
         run: sha256sum luminous-mcp-*.mcpb > SHA256SUMS.txt

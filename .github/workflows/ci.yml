@@ -75,6 +75,9 @@ jobs:
       - name: Build & validate MCP Bundle (.mcpb)
         run: bun run package:mcpb
 
+      - name: Sign MCPB bundle (self-signed)
+        run: bun x @anthropic-ai/mcpb sign --self-signed dist/luminous-mcp.mcpb
+
       - name: Verify MCPB bundle metadata
         run: bun x @anthropic-ai/mcpb info dist/luminous-mcp.mcpb
 
