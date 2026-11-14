@@ -297,6 +297,32 @@ describe("Playlist Database Layer", () => {
       expect(res.tracks[0].title).toBe("Wait");
     });
 
+    it("hydrates orphaned playlist_items from additional_metadata snapshot (Migration 82)", () => {
+      const snapshot = JSON.stringify({
+        title: "Deleted Song",
+        artist: "Removed Artist",
+        album: "Lost Album",
+        path: "/music/deleted.flac",
+        duration_sec: 195,
+      });
+      db.run(
+        `INSERT INTO playlist_items (playlist_id, song_id, position, uuid, type, url, additional_metadata)
+         VALUES (1, NULL, 2, 'uuid-orphan-1', 0, '/music/deleted.flac', ?1);`,
+        [snapshot]
+      );
+
+      const res = getPlaylistTracks(db, { playlist_id: 1 });
+      expect(res.total_tracks).toBe(3);
+      const orphan = res.tracks[2];
+      expect(orphan.track_id).toBeNull();
+      expect(orphan.title).toBe("Deleted Song");
+      expect(orphan.artist).toBe("Removed Artist");
+      expect(orphan.album).toBe("Lost Album");
+      expect(orphan.path).toBe("/music/deleted.flac");
+      expect(orphan.duration_seconds).toBe(195);
+      expect(orphan.unavailable).toBe(true);
+    });
+
     it("throws error when neither playlist_id nor playlist_name is provided", () => {
       expect(() => getPlaylistTracks(db, {})).toThrow(
         "Either playlist_id or playlist_name must be provided."

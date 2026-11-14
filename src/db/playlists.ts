@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { hasTable } from "./filters.ts";
 
 /**
  * Reserved playlist names in Luminous Music Player.
@@ -93,19 +94,6 @@ export interface AddTracksResult {
   tracks_added: number;
   total_tracks: number;
   track_ids: number[];
-}
-
-function hasTable(db: Database, tableName: string): boolean {
-  try {
-    const row = db
-      .query<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name=?1"
-      )
-      .get(tableName);
-    return (row?.count ?? 0) > 0;
-  } catch {
-    return false;
-  }
 }
 
 function toIsoString(timestampSeconds: number | null | undefined): string | null {
@@ -274,6 +262,9 @@ export function getPlaylistTracks(
         pi.uuid,
         pi.song_id,
         pi.type,
+        pi.url AS item_url,
+        pi.additional_metadata,
+        s.id AS matched_song_id,
         s.title,
         s.artist,
         s.album,
@@ -304,6 +295,9 @@ export function getPlaylistTracks(
         pi.uuid,
         pi.song_id,
         pi.type,
+        pi.url AS item_url,
+        pi.additional_metadata,
+        NULL AS matched_song_id,
         NULL AS title,
         NULL AS artist,
         NULL AS album,
@@ -327,27 +321,48 @@ export function getPlaylistTracks(
     });
   }
 
-  const tracks: PlaylistItemTrack[] = trackRows.map((r) => ({
-    item_id: r.item_id,
-    position: r.position,
-    uuid: r.uuid,
-    track_id: r.song_id ?? null,
-    type: r.type ?? 0,
-    title: r.title ?? null,
-    artist: r.artist ?? null,
-    album: r.album ?? null,
-    album_artist: r.album_artist ?? null,
-    year: r.year ?? null,
-    genre: r.genre ?? null,
-    duration_seconds:
+  const tracks: PlaylistItemTrack[] = trackRows.map((r) => {
+    const isOrphaned = r.song_id == null || (songsAvailable && r.matched_song_id == null);
+    let snapshot: Record<string, any> | null = null;
+    if (isOrphaned && typeof r.additional_metadata === "string" && r.additional_metadata.trim() !== "") {
+      try {
+        const parsed = JSON.parse(r.additional_metadata);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          snapshot = parsed;
+        }
+      } catch {
+        snapshot = null;
+      }
+    }
+
+    const durationFromSong =
       typeof r.length_nanosec === "number" && r.length_nanosec > 0
         ? Math.round(r.length_nanosec / 1_000_000_000)
-        : null,
-    path: r.path ?? null,
-    play_count: r.playcount ?? 0,
-    skip_count: r.skipcount ?? 0,
-    unavailable: Boolean(r.unavailable),
-  }));
+        : null;
+    const durationFromSnapshot =
+      snapshot && typeof snapshot.duration_sec === "number" && snapshot.duration_sec > 0
+        ? Math.round(snapshot.duration_sec)
+        : null;
+
+    return {
+      item_id: r.item_id,
+      position: r.position,
+      uuid: r.uuid,
+      track_id: r.song_id ?? null,
+      type: r.type ?? 0,
+      title: r.title ?? (typeof snapshot?.title === "string" ? snapshot.title : null),
+      artist: r.artist ?? (typeof snapshot?.artist === "string" ? snapshot.artist : null),
+      album: r.album ?? (typeof snapshot?.album === "string" ? snapshot.album : null),
+      album_artist: r.album_artist ?? null,
+      year: r.year ?? null,
+      genre: r.genre ?? null,
+      duration_seconds: durationFromSong ?? durationFromSnapshot,
+      path: r.path ?? (typeof snapshot?.path === "string" ? snapshot.path : (r.item_url ?? null)),
+      play_count: r.playcount ?? 0,
+      skip_count: r.skipcount ?? 0,
+      unavailable: isOrphaned ? true : Boolean(r.unavailable),
+    };
+  });
 
   const summary: PlaylistSummary = {
     id: playlistRow.id,

@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
 /**
  * Human-readable audio file format names mapped from Luminous FileType enum.
@@ -85,9 +86,11 @@ export interface TrackDetails {
     year: number | null;
     original_year: number | null;
     disc: number | null;
+    disc_subtitle: string | null;
     track: number | null;
     comment: string | null;
     grouping: string | null;
+    language: string | null;
     compilation: boolean;
   };
   technical_specs: {
@@ -112,6 +115,7 @@ export interface TrackDetails {
   lyrics: {
     has_lyrics: boolean;
     is_synced: boolean;
+    lyrics_source: string | null;
     text: string | null;
   };
   identifiers: {
@@ -199,36 +203,6 @@ function buildFtsQuery(raw: string): string {
 }
 
 /**
- * Checks if a column exists in a table.
- */
-function hasColumn(db: Database, tableName: string, columnName: string): boolean {
-  try {
-    return db
-      .query<{ name: string }, []>(`PRAGMA table_info(${tableName})`)
-      .all()
-      .some((col) => col.name === columnName);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Checks if a table exists in the database.
- */
-function hasTable(db: Database, tableName: string): boolean {
-  try {
-    const row = db
-      .query<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?"
-      )
-      .get(tableName);
-    return (row?.count ?? 0) > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Executes library search with FTS5 and structured filters.
  */
 export function searchLibrary(db: Database, params: SearchLibraryParams = {}): SearchLibraryResult {
@@ -236,7 +210,7 @@ export function searchLibrary(db: Database, params: SearchLibraryParams = {}): S
   const offset = Math.max(0, params.offset ?? 0);
   // songs.loved arrived in Luminous schema v55; older databases lack it.
   const lovedSelect = hasColumn(db, "songs", "loved") ? ", s.loved" : "";
-  const whereClauses: string[] = ["s.unavailable = 0"];
+  const whereClauses: string[] = [librarySongWhere(db, "s")];
   const queryParams: Record<string, unknown> = {
     $limit: limit,
     $offset: offset,
@@ -493,9 +467,11 @@ export function getTrackDetails(
       year: row.year ?? null,
       original_year: row.originalyear ?? null,
       disc: row.disc ?? null,
+      disc_subtitle: row.disc_subtitle ?? null,
       track: row.track ?? null,
       comment: row.comment ?? null,
       grouping: row.grouping ?? null,
+      language: row.language ?? null,
       compilation: Boolean(row.compilation),
     },
     technical_specs: {
@@ -532,6 +508,7 @@ export function getTrackDetails(
     lyrics: {
       has_lyrics: rawLyrics !== null,
       is_synced: isSyncedLyrics,
+      lyrics_source: row.lyrics_source ?? null,
       text: includeLyrics ? rawLyrics : null,
     },
     identifiers: {
@@ -615,7 +592,7 @@ export function getArtistSummary(
       playcount,
       skipcount
     FROM songs
-    WHERE unavailable = 0
+    WHERE ${librarySongWhere(db)}
       AND (
         artist LIKE $pattern ESCAPE '\\'
         OR album_artist LIKE $pattern ESCAPE '\\'

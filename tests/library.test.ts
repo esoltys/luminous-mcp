@@ -386,6 +386,32 @@ describe("Library Database Functions", () => {
       expect(res.count).toBe(0);
     });
 
+    it("excludes OpenedFile (source = 12) tracks from library search", () => {
+      const memDb = new Database(":memory:");
+      memDb.run(`
+        CREATE TABLE songs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT, artist TEXT, album TEXT, album_artist TEXT,
+          album_artist_sort TEXT, albumsort TEXT, composer TEXT, performer TEXT,
+          genre TEXT, track INTEGER, disc INTEGER, year INTEGER, bpm REAL,
+          ebur128_integrated_loudness_lufs REAL, length_nanosec INTEGER,
+          playcount INTEGER, unavailable INTEGER NOT NULL DEFAULT 0,
+          source INTEGER NOT NULL DEFAULT 1, lyrics TEXT
+        );
+      `);
+      memDb.run(
+        "INSERT INTO songs (title, artist, album, unavailable, source) VALUES ('Library Track', 'M83', 'Inside', 0, 1);"
+      );
+      memDb.run(
+        "INSERT INTO songs (title, artist, album, unavailable, source) VALUES ('External Opened Track', 'M83', 'Outside', 0, 12);"
+      );
+
+      const res = searchLibrary(memDb, { artist: "M83" });
+      expect(res.count).toBe(1);
+      expect(res.tracks[0].title).toBe("Library Track");
+      memDb.close();
+    });
+
     it("respects limit parameter", () => {
       const res = searchLibrary(db, { limit: 2 });
       expect(res.count).toBe(2);
@@ -448,6 +474,9 @@ describe("Library Database Functions", () => {
 
       expect(track.id).toBe(1);
       expect(track.metadata.title).toBe("Midnight City");
+      expect(track.metadata.disc_subtitle).toBeNull();
+      expect(track.metadata.language).toBeNull();
+      expect(track.lyrics.lyrics_source).toBeNull();
       expect(track.metadata.artist).toBe("M83");
       expect(track.metadata.performer).toBe("Rick Rubin");
       expect(track.technical_specs.file_type).toBe("FLAC");
@@ -463,6 +492,32 @@ describe("Library Database Functions", () => {
       expect(track.lyrics.text).toBeNull();
       expect(track.identifiers.musicbrainz_recording_id).toBe("mb-rec-1");
       expect(track.identifiers.barcode).toBe("123456789");
+    });
+
+    it("surfaces disc_subtitle, language, and lyrics_source when present", () => {
+      const memDb = new Database(":memory:");
+      memDb.run(`
+        CREATE TABLE songs (
+          id INTEGER PRIMARY KEY,
+          title TEXT,
+          artist TEXT,
+          album TEXT,
+          disc_subtitle TEXT,
+          language TEXT,
+          lyrics TEXT,
+          lyrics_source TEXT
+        );
+      `);
+      memDb.run(
+        "INSERT INTO songs (id, title, artist, album, disc_subtitle, language, lyrics, lyrics_source) VALUES (1, 'Track 1', 'M83', 'Album', 'Disc 1: Hurry Up', 'eng', 'Some lyrics', 'embedded');"
+      );
+
+      const track = getTrackDetails(memDb, 1);
+      expect(track).not.toBeNull();
+      expect(track?.metadata.disc_subtitle).toBe("Disc 1: Hurry Up");
+      expect(track?.metadata.language).toBe("eng");
+      expect(track?.lyrics.lyrics_source).toBe("embedded");
+      memDb.close();
     });
 
     it("includes lyrics text when include_lyrics is true", () => {
