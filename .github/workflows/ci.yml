@@ -78,11 +78,7 @@ jobs:
       - name: Sign & verify MCPB bundle (self-signed)
         run: |
           set -euo pipefail
-          umask 077
-          cert_file="${RUNNER_TEMP}/mcpb-ci-cert.pem"
-          key_file="${RUNNER_TEMP}/mcpb-ci-key.pem"
-          trap 'rm -f "$cert_file" "$key_file"' EXIT
-          bun x @anthropic-ai/mcpb sign --self-signed -c "$cert_file" -k "$key_file" dist/luminous-mcp.mcpb
+          bun x @anthropic-ai/mcpb sign --self-signed dist/luminous-mcp.mcpb
           bun x @anthropic-ai/mcpb verify dist/luminous-mcp.mcpb
 
       - name: Verify MCPB bundle metadata

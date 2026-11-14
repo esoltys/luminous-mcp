@@ -80,7 +80,7 @@ jobs:
             exit 1
           else
             echo "::notice::MCPB_SIGNING_CERT/MCPB_SIGNING_KEY not set; signing dry-run bundles with a temporary self-signed certificate."
-            sign_args=(--self-signed -c "$cert_file" -k "$key_file")
+            sign_args=(--self-signed)
           fi
 
           for bundle in dist/luminous-mcp-*.mcpb; do
