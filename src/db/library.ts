@@ -798,18 +798,20 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
     );
   }
 
-  // Profile "non-empty" test, tolerant of older artist_profiles schemas.
-  let hasProfileExpr = "0";
+  // Names with a curated profile, lowercased once. Built as a set (not a
+  // per-artist correlated lookup) because artist_key is BINARY-collated, so a
+  // NOCASE comparison cannot use its index and would rescan every profile for
+  // each artist. A set also keeps case-variant profile rows from duplicating
+  // an artist. Tolerates older artist_profiles schemas.
+  let profiledNamesSql = "SELECT NULL AS key WHERE 0";
   if (hasTable(db, "artist_profiles")) {
-    const nonEmpty = ["COALESCE(TRIM(p.bio), '') != ''", "COALESCE(TRIM(p.website), '') != ''"];
+    const nonEmpty = ["COALESCE(TRIM(bio), '') != ''", "COALESCE(TRIM(website), '') != ''"];
     for (const col of ["tags", "social_links"]) {
       if (hasColumn(db, "artist_profiles", col)) {
-        nonEmpty.push(`COALESCE(TRIM(p.${col}), '') NOT IN ('', '[]')`);
+        nonEmpty.push(`COALESCE(TRIM(${col}), '') NOT IN ('', '[]')`);
       }
     }
-    // EXISTS (not JOIN): artist_key is case-sensitive unique, so case variants
-    // could otherwise duplicate an artist row.
-    hasProfileExpr = `EXISTS (SELECT 1 FROM artist_profiles p WHERE p.artist_key = grouped.name COLLATE NOCASE AND (${nonEmpty.join(" OR ")}))`;
+    profiledNamesSql = `SELECT DISTINCT LOWER(artist_key) AS key FROM artist_profiles WHERE ${nonEmpty.join(" OR ")}`;
   }
 
   const bindings: Record<string, string | number> = {};
@@ -823,8 +825,10 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
       SELECT MIN(name) AS name, COUNT(DISTINCT id) AS track_count
       FROM names GROUP BY name COLLATE NOCASE
     ),
+    profiled AS (${profiledNamesSql}),
     artists AS (
-      SELECT grouped.name AS name, grouped.track_count AS track_count, ${hasProfileExpr} AS has_profile
+      SELECT grouped.name AS name, grouped.track_count AS track_count,
+             LOWER(grouped.name) IN (SELECT key FROM profiled) AS has_profile
       FROM grouped
       ${nameFilter ? "WHERE grouped.name LIKE $name ESCAPE '\\'" : ""}
     )
