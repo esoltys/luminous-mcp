@@ -25,6 +25,8 @@ import {
   type UpdateArtistProfileParams,
   type UpdateTrackMetadataParams,
 } from "../db/curation.ts";
+import { listArtistTags } from "../db/artistTags.ts";
+import { describeTagPolicy, getTagVocabulary } from "../db/tagVocabulary.ts";
 import { formatMcpResponse } from "../utils/response.ts";
 import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
 
@@ -388,6 +390,9 @@ export function registerCurationTools(
     }
   );
 
+  // Generated from the vocabulary in force, so the prose matches what is enforced.
+  const tagPolicy = describeTagPolicy(getTagVocabulary());
+
   // Shared by update_artist_profile and each item of update_artist_profiles.
   const artistProfileFields = {
     artist: z.string().min(1).describe("Artist name whose profile is being updated"),
@@ -411,15 +416,14 @@ export function registerCurationTools(
       .array(z.string())
       .optional()
       .describe(
-        "REPLACES the artist's whole tag list. Curated artist-attribute tags only, e.g. nationality ('Canadian') and named awards/honors ('Grammy Award'). " +
-          "Never genre/style tags and never decade/era tags ('80s') - those are tracked or derivable elsewhere. " +
+        `REPLACES the artist's whole tag list. ${tagPolicy} ` +
           "To change a few tags without reading the profile first, use add_tags/remove_tags instead (cannot be combined with tags)."
       ),
     add_tags: z
       .array(z.string())
       .optional()
       .describe(
-        "Tags to add to the existing list (case-insensitive, duplicates skipped, existing tags and order kept). Same rules as tags. Cannot be combined with tags."
+        "Tags to add to the existing list (case-insensitive, duplicates skipped, existing tags and order kept). Same vocabulary rules as tags. Cannot be combined with tags."
       ),
     remove_tags: z
       .array(z.string())
@@ -658,6 +662,74 @@ export function registerCurationTools(
           ],
         };
       }
+    }
+  );
+
+  server.registerTool(
+    "list_artist_tags",
+    {
+      title: "List Artist Tags",
+      description:
+        "List every tag in use on artist profiles with artist counts, grouped case-insensitively (spelling variants such as 'Award-Winning' vs 'Award Winning' are shown under `spellings`). " +
+        "Each tag is classified against the tag vocabulary: status 'allowed' | 'unknown' | 'denied' plus its category, with nearest allowed suggestions for the rest. " +
+        "Read-only: existing tags that break the vocabulary are reported here, never rewritten. The summary counts all tags before filtering. See get_tag_policy for the rules.",
+      inputSchema: {
+        query: z.string().optional().describe("Only tags containing this text (case-insensitive)"),
+        status: z
+          .enum(["allowed", "unknown", "denied"])
+          .optional()
+          .describe("Only tags with this vocabulary status"),
+        variants_only: z
+          .boolean()
+          .optional()
+          .describe("Only tags written with more than one spelling (default false)"),
+        limit: z.number().int().min(1).max(500).default(100).optional().describe("Maximum tags to return (default 100, max 500)"),
+        offset: z.number().int().min(0).default(0).optional().describe("Pagination offset (default 0)"),
+      },
+      annotations: READ_ONLY_LOCAL,
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+      try {
+        return formatMcpResponse(listArtistTags(db.getHandle(), params));
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            { type: "text" as const, text: `Failed to list artist tags: ${err.message ?? String(err)}` },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_tag_policy",
+    {
+      title: "Get Tag Policy",
+      description:
+        "Get the artist tag vocabulary this server enforces on update_artist_profile / update_artist_profiles: allowed and denied categories with their values, patterns and examples, how unknown tags are handled, and where the vocabulary was loaded from. Read it before writing tags.",
+      inputSchema: {},
+      annotations: READ_ONLY_LOCAL,
+    },
+    async () => {
+      const vocab = getTagVocabulary();
+      return formatMcpResponse({
+        source: vocab.source,
+        unknown_tags: vocab.unknown_tags,
+        summary: describeTagPolicy(vocab),
+        categories: vocab.categories,
+      });
     }
   );
 

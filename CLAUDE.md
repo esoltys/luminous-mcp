@@ -48,4 +48,5 @@ No lint script is defined; rely on `bun run typecheck` and `bun test`.
 - `LUMINOUS_BRIDGE_URL` / `LUMINOUS_BRIDGE_PORT` — override the desktop bridge target (default `http://127.0.0.1:21849`).
 - `LUMINOUS_MCP_PORT` — port for the SSE server (default `21850`).
 - `LUMINOUS_MCP_HOST` — bind host for the SSE server (default `0.0.0.0`).
+- `LUMINOUS_ARTIST_TAG_VOCAB` — path to a JSON file that replaces the built-in artist tag vocabulary (`src/db/tagVocabulary.ts`: categories with `values`/`patterns`, `kind` allowed|denied, `unknown_tags` warn|reject). A missing or invalid file fails startup.
 - `LUMINOUS_PRETTY_JSON=1` — pretty-print tool response JSON (debugging only; increases token usage).

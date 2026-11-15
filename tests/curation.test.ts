@@ -21,7 +21,29 @@ import {
   updateArtistProfiles,
   updateTrackMetadata,
 } from "../src/db/curation.ts";
-import { createMcpServer } from "../src/server.ts";
+import { defaultTagVocabulary, setTagVocabulary, type TagVocabulary } from "../src/db/tagVocabulary.ts";
+import { createMcpServer as createServer, type ServerOptions } from "../src/server.ts";
+
+/**
+ * These tests exercise tag mechanics (add/remove, batching, warnings), not the
+ * vocabulary, so they run under one that only keeps the decade rule. The
+ * built-in vocabulary is covered in tag-vocabulary.test.ts.
+ */
+const MECHANICS_VOCABULARY: TagVocabulary = {
+  unknown_tags: "warn",
+  source: "test",
+  categories: [
+    defaultTagVocabulary().categories.find((c) => c.id === "decade_era")!,
+    { id: "any", label: "any", kind: "allowed", description: "anything else", values: [], patterns: [".+"], examples: [] },
+  ],
+};
+
+beforeEach(() => setTagVocabulary(MECHANICS_VOCABULARY));
+afterEach(() => setTagVocabulary(null));
+
+function createMcpServer(options: ServerOptions = {}) {
+  return createServer({ tagVocabulary: MECHANICS_VOCABULARY, ...options });
+}
 
 interface TextContent {
   type: "text";
@@ -818,7 +840,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
     it("validates decade tags on add_tags but not remove_tags", () => {
       const db = setupCurationTestDb(tempDbPath);
-      expect(() => updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["80s"] })).toThrow(/Decade/);
+      expect(() => updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["80s"] })).toThrow(/decade\/era tag/);
       expect(() => updateArtistProfile(db, { artist: "Clean Artist", remove_tags: ["80s"] })).not.toThrow();
       db.close();
     });
@@ -1080,7 +1102,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
           artist: "Some Artist",
           tags: ["Canadian", "80s"],
         });
-      }).toThrow("Decade/era tags are not allowed");
+      }).toThrow("decade/era tag");
 
       db.close();
     });
@@ -1093,7 +1115,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
           artist: "Some Artist",
           tags: ["Eighties"],
         });
-      }).toThrow("Decade/era tags are not allowed");
+      }).toThrow("decade/era tag");
 
       db.close();
     });

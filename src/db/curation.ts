@@ -7,7 +7,10 @@ import {
   sameAlbum,
 } from "../utils/albumKey.ts";
 import { countryFields, normalizeCountryCode, type CountryFields } from "./country.ts";
+import { levenshtein } from "../utils/levenshtein.ts";
+import { parseTagList } from "./artistTags.ts";
 import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
+import { assertNoDecadeTags, getTagVocabulary, validateArtistTags } from "./tagVocabulary.ts";
 
 export { albumKey, albumKeyForTrack, hasColumn, hasTable, sameAlbum };
 
@@ -923,22 +926,6 @@ function findLibraryArtist(db: Database, name: string): LibraryArtistName | null
   return best;
 }
 
-function levenshtein(a: string, b: string): number {
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(
-        prev[j] + 1,
-        cur[j - 1] + 1,
-        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-      );
-    }
-    prev = cur;
-  }
-  return prev[b.length];
-}
-
 /** Shortest string for which "one name contains the other" counts as similar. */
 const MIN_CONTAINS_LENGTH = 3;
 
@@ -1058,14 +1045,7 @@ export function getArtistProfile(
     return null;
   }
 
-  let parsedTags: string[] = [];
-  if (rawProfile?.tags) {
-    try {
-      parsedTags = JSON.parse(rawProfile.tags);
-    } catch {
-      parsedTags = [];
-    }
-  }
+  const parsedTags = parseTagList(rawProfile?.tags);
 
   let parsedSocial: Array<{ platform?: string; handle_or_url?: string } | string> = [];
   if (rawProfile?.social_links) {
@@ -1157,29 +1137,6 @@ function assertNoTwitterOrXLinks(
   }
 }
 
-const DECADE_NUMERIC_TAG_RE = /^\d{1,3}0s$/;
-const DECADE_WORD_TAG_RE =
-  /^(twenties|thirties|forties|fifties|sixties|seventies|eighties|nineties)$/;
-
-function isDecadeTag(tag: string): boolean {
-  const normalized = tag.trim().toLowerCase().replace(/^[‘’']/, "");
-  return DECADE_NUMERIC_TAG_RE.test(normalized) || DECADE_WORD_TAG_RE.test(normalized);
-}
-
-/**
- * Throws if any tag is a decade/era-active tag (e.g. "80s", "1980s", "eighties").
- * Era active is derivable from the library's own release data, not a curated fact.
- */
-function assertNoDecadeTags(tags: string[] | undefined): void {
-  if (!tags) return;
-  const badTags = tags.filter(isDecadeTag);
-  if (badTags.length > 0) {
-    throw new Error(
-      `Decade/era tags are not allowed in artist profiles (found: ${badTags.join(", ")}). Era active can be derived from library data; use only nationality or named-award tags.`
-    );
-  }
-}
-
 /**
  * Checks whether any tag being written matches a parent artist tag group that
  * already has child assignments in Luminous's tag hierarchy.
@@ -1233,14 +1190,17 @@ function touchesTags(p: TagParams): boolean {
   return p.tags !== undefined || p.add_tags !== undefined || p.remove_tags !== undefined;
 }
 
+/** The tags a call writes; remove_tags may name anything, so it is never validated. */
+function writtenTags(p: TagParams): string[] | undefined {
+  return p.tags ?? p.add_tags;
+}
+
 function assertTagParams(p: TagParams): void {
   if (p.tags !== undefined && (p.add_tags !== undefined || p.remove_tags !== undefined)) {
     throw new Error(
       "tags (replace the whole list) cannot be combined with add_tags/remove_tags. Use one or the other."
     );
   }
-  // Only tags being written are validated; remove_tags may name anything.
-  assertNoDecadeTags(p.tags ?? p.add_tags);
 }
 
 /**
@@ -1255,13 +1215,7 @@ function applyTagParams(existingJson: string | null, p: TagParams): string {
   const stored = existingJson ?? "[]";
   if (p.add_tags === undefined && p.remove_tags === undefined) return stored;
 
-  let current: string[] = [];
-  try {
-    const parsed = JSON.parse(stored);
-    if (Array.isArray(parsed)) current = parsed.filter((t): t is string => typeof t === "string");
-  } catch {
-    current = [];
-  }
+  const current = parseTagList(stored);
 
   const removeSet = new Set((p.remove_tags ?? []).map((t) => t.trim().toLowerCase()));
   const next = current.filter((t) => !removeSet.has(t.trim().toLowerCase()));
@@ -1375,6 +1329,7 @@ function applyArtistProfileUpdate(
 
   assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
   assertTagParams(params);
+  const tagWarnings = validateArtistTags(getTagVocabulary(), writtenTags(params));
   // "" is invalid (use null to clear), so only null/undefined skip validation.
   const newCountry = params.country == null ? params.country : normalizeCountryCode(params.country);
 
@@ -1467,7 +1422,7 @@ function applyArtistProfileUpdate(
   );
 
   const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
-  const warnings = findParentTagGroupWarnings(db, params.tags ?? params.add_tags);
+  const warnings = [...tagWarnings, ...findParentTagGroupWarnings(db, writtenTags(params))];
 
   const result: UpdateArtistProfileResult = {
     success: true,
@@ -1774,14 +1729,7 @@ export function getAlbumProfile(
     return null;
   }
 
-  let parsedTags: string[] = [];
-  if (rawProfile?.tags) {
-    try {
-      parsedTags = JSON.parse(rawProfile.tags);
-    } catch {
-      parsedTags = [];
-    }
-  }
+  const parsedTags = parseTagList(rawProfile?.tags);
 
   let parsedLinks: Array<AlbumLinkItem | string> = [];
   if (rawProfile?.links) {
@@ -1857,6 +1805,7 @@ export function updateAlbumProfile(
     );
   }
   assertTagParams(params);
+  assertNoDecadeTags(getTagVocabulary(), writtenTags(params));
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.artist !== undefined) fieldsUpdated.artist = params.artist;
@@ -2026,12 +1975,7 @@ export function findArtistsByTag(
 
   const matches: ArtistTagMatch[] = [];
   for (const row of rows) {
-    let parsedTags: string[] = [];
-    try {
-      parsedTags = JSON.parse(row.tags);
-    } catch {
-      parsedTags = [];
-    }
+    const parsedTags = parseTagList(row.tags);
     if (parsedTags.some((t) => t.trim().toLowerCase() === tagLower)) {
       matches.push({
         artist: row.artist_key,
