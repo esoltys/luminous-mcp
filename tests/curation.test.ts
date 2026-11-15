@@ -603,6 +603,73 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
     });
   });
 
+  describe("artist profile casing vs library spelling", () => {
+    // `nocase` mirrors Luminous schema v83+; the plain fixture mirrors older DBs.
+    function setup(nocase: boolean): Database {
+      const db = setupCurationTestDb(tempDbPath);
+      if (nocase) {
+        db.run("DROP TABLE artist_profiles;");
+        db.run(`CREATE TABLE artist_profiles (
+          artist_key TEXT PRIMARY KEY COLLATE NOCASE,
+          website TEXT, tags TEXT NOT NULL DEFAULT '[]',
+          social_links TEXT NOT NULL DEFAULT '[]', bio TEXT);`);
+      }
+      db.run(`INSERT INTO songs (title, artist, album_artist, album, path)
+        VALUES ('A', 'The War on Drugs', 'The War on Drugs', 'Lost in the Dream', '/m/wod1.mp3'),
+               ('B', 'The War on Drugs', 'The War on Drugs', 'Lost in the Dream', '/m/wod2.mp3'),
+               ('C', 'The War On Drugs', NULL, 'Other', '/m/wod3.mp3');`);
+      db.run(`INSERT INTO artist_profiles (artist_key, bio) VALUES ('The War On Drugs', 'bio');`);
+      return db;
+    }
+
+    for (const nocase of [true, false]) {
+      it(`read returns library spelling and exposes the differing stored key (nocase=${nocase})`, () => {
+        const db = setup(nocase);
+        const profile = getArtistProfile(db, { artist: "the war on drugs" });
+        expect(profile?.artist).toBe("The War on Drugs");
+        expect(profile?.stored_artist_key).toBe("The War On Drugs");
+        expect(profile?.bio).toBe("bio");
+        db.close();
+      });
+
+      it(`update resolves to the one existing row regardless of casing (nocase=${nocase})`, () => {
+        const db = setup(nocase);
+        const result = updateArtistProfile(db, { artist: "THE WAR ON DRUGS", website: "https://w.example" });
+        expect(result.artist).toBe("The War on Drugs");
+        const rows = db.query("SELECT artist_key FROM artist_profiles WHERE artist_key LIKE 'the war on drugs'").all();
+        expect(rows.length).toBe(1);
+        db.close();
+      });
+    }
+
+    it("omits stored_artist_key when the stored key matches the library", () => {
+      const db = setup(true);
+      db.run("UPDATE artist_profiles SET artist_key = 'The War on Drugs';");
+      const profile = getArtistProfile(db, { artist: "The War on Drugs" });
+      expect(profile?.stored_artist_key).toBeUndefined();
+      db.close();
+    });
+
+    it("uses the library spelling for a new key", () => {
+      const db = setup(true);
+      db.run("DELETE FROM artist_profiles;");
+      updateArtistProfile(db, { artist: "the war on drugs", bio: "new" });
+      const row = db.query<{ artist_key: string }, []>("SELECT artist_key FROM artist_profiles").get();
+      expect(row?.artist_key).toBe("The War on Drugs");
+      db.close();
+    });
+
+    it("keeps the caller's spelling for an artist not in the library", () => {
+      const db = setup(true);
+      updateArtistProfile(db, { artist: "Unknown Band", bio: "x" });
+      const row = db
+        .query<{ artist_key: string }, []>("SELECT artist_key FROM artist_profiles WHERE bio = 'x'")
+        .get();
+      expect(row?.artist_key).toBe("Unknown Band");
+      db.close();
+    });
+  });
+
   describe("findArtistsByTag", () => {
     it("finds artists whose tags include the given tag (case-insensitive)", () => {
       const db = setupCurationTestDb(tempDbPath);
