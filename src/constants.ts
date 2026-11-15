@@ -1,5 +1,5 @@
 export const SERVER_NAME = "luminous-mcp";
-export const SERVER_VERSION = "1.12.1";
+export const SERVER_VERSION = "1.13.0";
 
 /**
  * Current database schema version supported by this server,
