@@ -127,6 +127,13 @@ export interface ArtistProfile {
   artist: string;
   /** Stored profile key, only present when it differs from `artist`. */
   stored_artist_key?: string;
+  /**
+   * `curated`: a stored profile row exists. `library_only`: the artist is known
+   * (library or enrichment data) but has no profile row yet. (An entirely unknown
+   * artist is `null` from getArtistProfile; the tool layer reports `not_found`.)
+   * A string, so it survives null/empty stripping in tool responses.
+   */
+  status: "curated" | "library_only";
   bio: string | null;
   website: string | null;
   tags: string[];
@@ -148,11 +155,15 @@ export interface UpdateArtistProfileParams {
   tags?: string[];
   social_links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   links?: Array<{ platform?: string; handle_or_url?: string } | string>;
+  /** Permit creating a profile for a name that matches no library artist. */
+  allow_unknown_artist?: boolean;
 }
 
 export interface UpdateArtistProfileResult {
   success: boolean;
   artist: string;
+  /** True when this call created the profile row, false when it updated one. */
+  created: boolean;
   updated_fields: Record<string, unknown>;
   profile: ArtistProfile;
   warnings?: string[];
@@ -848,6 +859,57 @@ function resolveLibraryArtistName(db: Database, name: string): string | null {
   return row?.name ?? null;
 }
 
+function levenshtein(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Up to `limit` library artist names closest to `name`, best first. A name is a
+ * candidate if it contains or is contained by the query, or is within a small
+ * edit distance (case-insensitive), so typos and partial names both match.
+ */
+function suggestLibraryArtists(db: Database, name: string, limit = 5): string[] {
+  if (!hasTable(db, "songs")) return [];
+  const albumArtist = hasColumn(db, "songs", "album_artist")
+    ? "UNION SELECT album_artist FROM songs WHERE album_artist IS NOT NULL AND album_artist <> ''"
+    : "";
+  const names = db
+    .query<{ v: string }, []>(
+      `SELECT artist AS v FROM songs WHERE artist <> '' ${albumArtist}`
+    )
+    .all()
+    .map((r) => r.v);
+
+  const q = name.toLowerCase();
+  const maxDistance = Math.max(2, Math.floor(q.length * 0.4));
+  const seen = new Set<string>();
+  const scored: Array<{ name: string; score: number }> = [];
+  for (const candidate of names) {
+    const c = candidate.toLowerCase();
+    if (seen.has(c)) continue;
+    seen.add(c);
+    const contains = c.includes(q) || q.includes(c);
+    const distance = levenshtein(q, c);
+    if (contains || distance <= maxDistance) {
+      scored.push({ name: candidate, score: contains ? Math.min(distance, 1) - 1 : distance });
+    }
+  }
+  scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
+  return scored.slice(0, limit).map((s) => s.name);
+}
+
 /**
  * Retrieves an artist's curated profile (bio, website, tags, social links)
  * and Wikipedia context enrichment from the database.
@@ -970,6 +1032,7 @@ export function getArtistProfile(
   return {
     artist: displayName,
     stored_artist_key: storedKey,
+    status: rawProfile ? "curated" : "library_only",
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
@@ -1166,7 +1229,18 @@ export function updateArtistProfile(
     // case-insensitively and rewrites a stale spelling on its own next save, so
     // renaming here would only race the app. New rows use the library's
     // spelling, falling back to the caller's input for artists not in the library.
-    const keyToUse = existing?.artist_key ?? resolveLibraryArtistName(db, artistName) ?? artistName;
+    const libraryName = existing ? null : resolveLibraryArtistName(db, artistName);
+    if (!existing && !libraryName && !params.allow_unknown_artist) {
+      const suggestions = suggestLibraryArtists(db, artistName);
+      throw new Error(
+        `"${artistName}" matches no artist in the library and has no existing profile.` +
+          (suggestions.length > 0
+            ? ` Did you mean: ${suggestions.map((n) => `"${n}"`).join(", ")}?`
+            : " No similar library artists were found.") +
+          ` Pass allow_unknown_artist: true to create a profile for it anyway.`
+      );
+    }
+    const keyToUse = existing?.artist_key ?? libraryName ?? artistName;
     const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
     const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
     const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
@@ -1188,14 +1262,15 @@ export function updateArtistProfile(
     const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
     const warnings = findParentTagGroupWarnings(db, params.tags);
 
-    return { keyToUse, updatedProfile, warnings };
+    return { keyToUse, created: !existing, updatedProfile, warnings };
   });
 
-  const { keyToUse, updatedProfile, warnings } = tx.immediate();
+  const { created, updatedProfile, warnings } = tx.immediate();
 
   const result: UpdateArtistProfileResult = {
     success: true,
     artist: updatedProfile.artist,
+    created,
     updated_fields: fieldsUpdated,
     profile: updatedProfile,
   };

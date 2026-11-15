@@ -661,11 +661,88 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
     it("keeps the caller's spelling for an artist not in the library", () => {
       const db = setup(true);
-      updateArtistProfile(db, { artist: "Unknown Band", bio: "x" });
+      updateArtistProfile(db, { artist: "Unknown Band", bio: "x", allow_unknown_artist: true });
       const row = db
         .query<{ artist_key: string }, []>("SELECT artist_key FROM artist_profiles WHERE bio = 'x'")
         .get();
       expect(row?.artist_key).toBe("Unknown Band");
+      db.close();
+    });
+  });
+
+  describe("profile status and unknown-artist guard", () => {
+    function seed(): Database {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run(`INSERT INTO songs (title, artist, album_artist, album, path)
+        VALUES ('A', 'Lola Young', 'Lola Young', 'My Mind', '/m/ly.mp3'),
+               ('B', 'twenty one pilots', 'twenty one pilots', 'Scaled', '/m/top.mp3');`);
+      return db;
+    }
+
+    it("reports curated, library_only and not_found as distinct read outcomes", () => {
+      const db = seed();
+      expect(getArtistProfile(db, { artist: "Clean Artist" })?.status).toBe("curated");
+      expect(getArtistProfile(db, { artist: "Lola Young" })?.status).toBe("library_only");
+      expect(getArtistProfile(db, { artist: "Nobody Here" })).toBeNull();
+      db.close();
+    });
+
+    it("status survives response stripping and not_found is a normal result via MCP", async () => {
+      seed().close();
+      const { server } = createMcpServer({ dbPath: tempDbPath });
+      const [cT, sT] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "t", version: "1.0.0" }, { capabilities: {} });
+      await server.connect(sT);
+      await client.connect(cT);
+
+      const libOnly = await client.callTool({ name: "get_artist_profile", arguments: { artist: "Lola Young" } });
+      expect(JSON.parse(getTextContent(libOnly).text).status).toBe("library_only");
+      const missing = await client.callTool({ name: "get_artist_profile", arguments: { artist: "Nobody Here" } });
+      expect((missing as any).isError).toBeFalsy();
+      expect(JSON.parse(getTextContent(missing).text)).toEqual({ artist: "Nobody Here", status: "not_found" });
+    });
+
+    it("reports created true on first write and false afterwards", () => {
+      const db = seed();
+      const first = updateArtistProfile(db, { artist: "lola young", bio: "one" });
+      expect(first.created).toBe(true);
+      expect(first.artist).toBe("Lola Young");
+      expect(first.profile.status).toBe("curated");
+      expect(updateArtistProfile(db, { artist: "Lola Young", bio: "two" }).created).toBe(false);
+      db.close();
+    });
+
+    it("rejects an unknown artist with nearest-match suggestions and writes nothing", () => {
+      const db = seed();
+      expect(() => updateArtistProfile(db, { artist: "Lola Yung", bio: "x" })).toThrow(/Did you mean: "Lola Young"/);
+      expect(
+        db.query("SELECT 1 FROM artist_profiles WHERE artist_key LIKE 'Lola%'").all().length
+      ).toBe(0);
+      db.close();
+    });
+
+    it("lists no suggestions when nothing is similar", () => {
+      const db = seed();
+      expect(() => updateArtistProfile(db, { artist: "Zzzzzzzzzz", bio: "x" })).toThrow(
+        /No similar library artists/
+      );
+      db.close();
+    });
+
+    it("allow_unknown_artist creates the profile", () => {
+      const db = seed();
+      const res = updateArtistProfile(db, { artist: "Lola Yung", bio: "x", allow_unknown_artist: true });
+      expect(res.created).toBe(true);
+      expect(res.artist).toBe("Lola Yung");
+      db.close();
+    });
+
+    it("still edits an existing profile whose artist is not in the library", () => {
+      const db = seed();
+      db.run("DELETE FROM songs WHERE artist = 'Lola Young'");
+      updateArtistProfile(db, { artist: "Lola Young", bio: "x", allow_unknown_artist: true });
+      const res = updateArtistProfile(db, { artist: "Lola Young", bio: "y" });
+      expect(res.created).toBe(false);
       db.close();
     });
   });
@@ -737,6 +814,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
       const result = updateArtistProfile(db, {
         artist: "New Artist",
+        allow_unknown_artist: true,
         website: "https://newartist.example.com",
         bio: "Bio for new artist",
         tags: ["indie", "electronic"],
@@ -871,6 +949,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
       const result = updateArtistProfile(db, {
         artist: "Some Artist",
+        allow_unknown_artist: true,
         tags: ["Canadian", "Grammy Award"],
       });
 
@@ -903,6 +982,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
       const result = updateArtistProfile(db, {
         artist: "Shania Twain",
+        allow_unknown_artist: true,
         tags: ["award-winning", "Award-Winning", "Grammy Award", "Empty-Group"],
       });
 
@@ -1615,6 +1695,7 @@ describe("MCP Curation Tools Integration", () => {
         name: "update_artist_profile",
         arguments: {
           artist: "GUNSHIP",
+          allow_unknown_artist: true,
           bio: "Synthwave band formed in 2014.",
         },
       });
