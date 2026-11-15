@@ -28,6 +28,7 @@ import {
 import { listArtistTags } from "../db/artistTags.ts";
 import { describeTagPolicy, getTagVocabulary } from "../db/tagVocabulary.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { withDb } from "./withDb.ts";
 import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
 
 /** Max entries per update_artist_profiles call (bounds write-lock time and response size). */
@@ -84,19 +85,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const options: AuditMetadataOptions = {
@@ -123,7 +112,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -143,19 +132,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const results = getGenreHierarchy(handle, {
@@ -174,7 +151,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -204,19 +181,7 @@ export function registerCurationTools(
       },
       annotations: WRITE_IDEMPOTENT,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       if (params.track_id === undefined && (!params.track_ids || params.track_ids.length === 0)) {
         return {
           isError: true,
@@ -266,7 +231,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -283,19 +248,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       if (!params.artist && !params.artist_id) {
         return {
           isError: true,
@@ -337,7 +290,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -356,18 +309,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
+    withDb(db, async (params) => {
       if (!params.artist && !params.artist_id) {
         return {
           isError: true,
@@ -387,7 +329,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   // Generated from the vocabulary in force, so the prose matches what is enforced.
@@ -479,19 +421,7 @@ export function registerCurationTools(
       inputSchema: artistProfileFields,
       annotations: WRITE_IDEMPOTENT,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const updateParams: UpdateArtistProfileParams = {
@@ -529,7 +459,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -557,19 +487,7 @@ export function registerCurationTools(
       },
       annotations: WRITE_IDEMPOTENT,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const result = updateArtistProfiles(db.getHandle(), params.updates as UpdateArtistProfileParams[], {
           allow_unknown_artist: params.allow_unknown_artist,
@@ -598,7 +516,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -627,19 +545,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const options: FindArtistsByTagOptions = {
@@ -662,7 +568,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -749,19 +655,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       if (!params.album && !params.release_group_id) {
         return {
           isError: true,
@@ -806,7 +700,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -850,19 +744,7 @@ export function registerCurationTools(
       },
       annotations: WRITE_IDEMPOTENT,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const updateParams: UpdateAlbumProfileParams = {
@@ -898,7 +780,7 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -931,19 +813,7 @@ export function registerCurationTools(
       },
       annotations: READ_ONLY_EXTERNAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       if (params.track_id === undefined && !params.mbid) {
         return {
           isError: true,
@@ -979,6 +849,6 @@ export function registerCurationTools(
           ],
         };
       }
-    }
+    })
   );
 }
