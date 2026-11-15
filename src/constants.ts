@@ -4,8 +4,14 @@ export const SERVER_VERSION = "1.12.1";
 /**
  * Current database schema version supported by this server,
  * matching Luminous Music Player's CURRENT_SCHEMA_VERSION.
+ *
+ * 83 made `artist_profiles.artist_key` case-insensitive, 84 added
+ * `artist_profiles.country` and 85 added `artist_context_enrichment.country`;
+ * this server reads and writes the first two. `get_server_info` reports a
+ * database newer than this as incompatible, so bump it with each app migration
+ * the server has been checked against.
  */
-export const KNOWN_SCHEMA_VERSION = 82;
+export const KNOWN_SCHEMA_VERSION = 85;
 
 /**
  * SongSource discriminant for files opened directly from outside watched folders
