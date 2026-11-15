@@ -7,6 +7,36 @@ import { buildManifest, listRegisteredTools } from "../scripts/manifest.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
 
+// Typical packaging time is ~10-15s, but the macOS CI runner has occasionally
+// hung (child killed at the test timeout, exit code null). Each attempt gets its
+// own kill timer and one retry, and the child's output is kept so a failure says why.
+const PACKAGE_ATTEMPT_TIMEOUT_MS = 60_000;
+const PACKAGE_ATTEMPTS = 2;
+
+async function runPackager(): Promise<{ ok: boolean; log: string }> {
+  let log = "";
+  for (let attempt = 1; attempt <= PACKAGE_ATTEMPTS; attempt++) {
+    const proc = Bun.spawn(["bun", "run", "scripts/package-mcpb.ts"], {
+      cwd: projectRoot,
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: PACKAGE_ATTEMPT_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    log += `--- attempt ${attempt}: exit=${code} signal=${proc.signalCode ?? "none"} ---
+${out}${err}
+`;
+    if (code === 0) return { ok: true, log };
+  }
+  return { ok: false, log };
+}
+
 describe("MCPB Packaging Assets & Configuration", () => {
   it("has a valid 512x512 PNG icon in assets/icon.png", () => {
     const iconPath = path.join(projectRoot, "assets", "icon.png");
@@ -44,11 +74,9 @@ describe("MCPB Packaging Assets & Configuration", () => {
   });
 
   it("packages bundle and produces valid .mcpb and .dxt archives", async () => {
-    const result = Bun.spawnSync(["bun", "run", "scripts/package-mcpb.ts"], {
-      cwd: projectRoot,
-      env: process.env,
-    });
-    expect(result.exitCode).toBe(0);
+    const result = await runPackager();
+    if (!result.ok) throw new Error(`Packaging failed:
+${result.log}`);
 
     const mcpbPath = path.join(projectRoot, "dist", "luminous-mcp.mcpb");
     const dxtPath = path.join(projectRoot, "dist", "luminous-mcp.dxt");
@@ -63,7 +91,7 @@ describe("MCPB Packaging Assets & Configuration", () => {
     const mcpbBuffer = fs.readFileSync(mcpbPath);
     const files = unzipSync(new Uint8Array(mcpbBuffer));
     expect(files["skills/luminous/SKILL.md"]).toBeDefined();
-  }, 30000);
+  }, PACKAGE_ATTEMPT_TIMEOUT_MS * PACKAGE_ATTEMPTS + 30_000);
 
   it("keeps SERVER_VERSION in sync with package.json", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
