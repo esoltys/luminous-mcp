@@ -871,7 +871,6 @@ export function getArtistProfile(
   // Find musicbrainz_artist_id or artist name from songs table if needed
   let resolvedArtistName = artistName ?? "";
   let songArtistFound = false;
-  let libraryName: string | null = null;
   if (hasTable(db, "songs")) {
     if (artistName && !mbid) {
       const songRow = db
@@ -881,7 +880,6 @@ export function getArtistProfile(
         .get(artistName, artistName);
       if (songRow) {
         songArtistFound = true;
-        libraryName = resolveLibraryArtistName(db, artistName);
         if (songRow.musicbrainz_artist_id) {
           mbid = songRow.musicbrainz_artist_id;
         }
@@ -895,12 +893,12 @@ export function getArtistProfile(
       if (songRow) {
         songArtistFound = true;
         resolvedArtistName = songRow.artist ?? songRow.album_artist ?? "";
-        libraryName = resolvedArtistName
-          ? resolveLibraryArtistName(db, resolvedArtistName)
-          : null;
       }
     }
   }
+
+  const libraryName =
+    songArtistFound && resolvedArtistName ? resolveLibraryArtistName(db, resolvedArtistName) : null;
 
   // Check artist_profiles table
   interface RawProfile {
