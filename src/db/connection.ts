@@ -33,6 +33,16 @@ export class LuminousDatabase {
   }
 
   /**
+   * Human-readable explanation, with remedies, for when the database file is absent.
+   */
+  missingMessage(): string {
+    return (
+      `Luminous database file not found at: "${this.dbPath}". ` +
+      `Ensure Luminous Music Player has been launched at least once, or set LUMINOUS_DB_PATH (portable Luminous installs keep it in <luminous folder>/data; use LUMINOUS_DATA_DIR).`
+    );
+  }
+
+  /**
    * Checks whether the database connection is currently open.
    */
   isOpen(): boolean {
@@ -51,10 +61,7 @@ export class LuminousDatabase {
     }
 
     if (!this.exists()) {
-      throw new Error(
-        `Luminous database file not found at: "${this.dbPath}". ` +
-        `Ensure Luminous Music Player has been launched at least once, or set LUMINOUS_DB_PATH (portable Luminous installs keep it in <luminous folder>/data; use LUMINOUS_DATA_DIR).`
-      );
+      throw new Error(this.missingMessage());
     }
 
     const db = this.isReadonly

@@ -8,6 +8,7 @@ import {
   type RecentHistoryParams,
 } from "../db/analytics.ts";
 import { formatMcpResponse } from "../utils/response.ts";
+import { withDb } from "./withDb.ts";
 import { READ_ONLY_LOCAL } from "./annotations.ts";
 
 /**
@@ -77,19 +78,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const statsParams: ListeningStatsParams = {
@@ -118,7 +107,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
           ],
         };
       }
-    }
+    })
   );
 
   server.registerTool(
@@ -181,19 +170,7 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
       },
       annotations: READ_ONLY_LOCAL,
     },
-    async (params) => {
-      if (!db.exists()) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
-            },
-          ],
-        };
-      }
-
+    withDb(db, async (params) => {
       try {
         const handle = db.getHandle();
         const historyParams: RecentHistoryParams = {
@@ -222,6 +199,6 @@ export function registerAnalyticsTools(server: McpServer, db: LuminousDatabase):
           ],
         };
       }
-    }
+    })
   );
 }
