@@ -6,7 +6,7 @@ import {
   isCompositeAlbumKey,
   sameAlbum,
 } from "../utils/albumKey.ts";
-import { countryDisplayName, normalizeCountryCode } from "./country.ts";
+import { countryFields, normalizeCountryCode, type CountryFields } from "./country.ts";
 import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
 export { albumKey, albumKeyForTrack, hasColumn, hasTable, sameAlbum };
@@ -135,7 +135,7 @@ export const PROFILE_STATUS_DESCRIPTIONS: Record<ProfileStatus, string> = {
   not_found: "the artist is unknown",
 };
 
-export interface ArtistProfile {
+export interface ArtistProfile extends CountryFields {
   /** Library spelling when the artist is in the library, else the stored key. */
   artist: string;
   /** Stored profile key, only present when it differs from `artist`. */
@@ -145,10 +145,6 @@ export interface ArtistProfile {
   bio: string | null;
   website: string | null;
   tags: string[];
-  /** ISO 3166-1 alpha-2 code stored on the profile; absent when unset or the database predates the column. */
-  country?: string;
-  /** English display name for `country`. */
-  country_name?: string;
   social_links: Array<{ platform?: string; handle_or_url?: string } | string>;
   sources?: BioSourceLink[];
   wikipedia: {
@@ -1094,8 +1090,7 @@ export function getArtistProfile(
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
-    country: rawProfile?.country || undefined,
-    country_name: countryDisplayName(rawProfile?.country),
+    ...countryFields(rawProfile?.country),
     social_links: parsedSocial,
     sources: bioSources.length > 0 ? bioSources : undefined,
     wikipedia: rawContext
@@ -1380,7 +1375,8 @@ function applyArtistProfileUpdate(
 
   assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
   assertTagParams(params);
-  const newCountry = params.country ? normalizeCountryCode(params.country) : params.country;
+  // "" is invalid (use null to clear), so only null/undefined skip validation.
+  const newCountry = params.country == null ? params.country : normalizeCountryCode(params.country);
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.website !== undefined) fieldsUpdated.website = params.website;
@@ -1974,11 +1970,9 @@ export interface FindArtistsByTagOptions {
   offset?: number;
 }
 
-export interface ArtistTagMatch {
+export interface ArtistTagMatch extends CountryFields {
   artist: string;
   tags: string[];
-  country?: string;
-  country_name?: string;
 }
 
 export interface FindArtistsByTagResult {
@@ -2042,8 +2036,7 @@ export function findArtistsByTag(
       matches.push({
         artist: row.artist_key,
         tags: parsedTags,
-        country: row.country || undefined,
-        country_name: countryDisplayName(row.country),
+        ...countryFields(row.country),
       });
     }
   }

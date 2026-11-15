@@ -22,6 +22,20 @@ export function countryDisplayName(code: string | null | undefined): string | un
   }
 }
 
+/** The pair of fields every response shows for a stored country code. */
+export interface CountryFields {
+  /** ISO 3166-1 alpha-2 code; absent when no country is stored. */
+  country?: string;
+  /** English display name for `country`. */
+  country_name?: string;
+}
+
+/** Response fields for a stored (possibly NULL or empty) country code. */
+export function countryFields(storedCode: string | null | undefined): CountryFields {
+  if (!storedCode) return {};
+  return { country: storedCode, country_name: countryDisplayName(storedCode) };
+}
+
 /**
  * Validates `input` as an alpha-2 country code and returns it uppercased.
  * Throws for anything else (country names, three-letter codes, unassigned codes).

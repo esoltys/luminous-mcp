@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { countryDisplayName, normalizeCountryCode } from "./country.ts";
+import { countryFields, normalizeCountryCode, type CountryFields } from "./country.ts";
 import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
 /**
@@ -758,13 +758,10 @@ export interface ListArtistsOptions {
   offset?: number;
 }
 
-export interface ArtistListItem {
+export interface ArtistListItem extends CountryFields {
   artist: string;
   track_count: number;
   has_profile: boolean;
-  /** Alpha-2 code from the artist's profile, when set. */
-  country?: string;
-  country_name?: string;
 }
 
 export interface ListArtistsResult {
@@ -877,8 +874,7 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
       artist: r.name,
       track_count: r.track_count,
       has_profile: r.has_profile === 1,
-      country: r.country ?? undefined,
-      country_name: countryDisplayName(r.country),
+      ...countryFields(r.country),
     })),
     pagination: {
       total_matching: total,

@@ -95,6 +95,11 @@ describe("artist profile country", () => {
     expect(db.query("SELECT COUNT(*) AS n FROM artist_profiles").get()).toEqual({ n: 0 });
   });
 
+  it("rejects an empty string (null is the way to clear)", () => {
+    db = openDb(true);
+    expect(() => updateArtistProfile(db, { artist: "Drake", country: "" })).toThrow(/alpha-2/);
+  });
+
   it("reports an identical country write as unchanged in a batch", () => {
     db = openDb(true);
     updateArtistProfile(db, { artist: "Drake", country: "CA" });
