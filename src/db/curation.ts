@@ -152,6 +152,7 @@ export interface UpdateArtistProfileResult {
   artist: string;
   updated_fields: Record<string, unknown>;
   profile: ArtistProfile;
+  warnings?: string[];
 }
 
 export interface AlbumLinkItem {
@@ -1007,6 +1008,55 @@ function assertNoDecadeTags(tags: string[] | undefined): void {
 }
 
 /**
+ * Checks whether any tag being written matches a parent artist tag group that
+ * already has child assignments in Luminous's tag hierarchy.
+ */
+function findParentTagGroupWarnings(db: Database, tags: string[] | undefined): string[] {
+  if (!tags || tags.length === 0) {
+    return [];
+  }
+  if (!hasTable(db, "artist_tag_groups") || !hasTable(db, "artist_tag_assignments")) {
+    return [];
+  }
+
+  const rows = db
+    .query<{ name: string; child_count: number }, []>(
+      `SELECT g.name AS name, COUNT(a.id) AS child_count
+       FROM artist_tag_groups g
+       JOIN artist_tag_assignments a ON a.group_id = g.id
+       GROUP BY g.id`
+    )
+    .all();
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const parentGroups = new Map<string, { name: string; childCount: number }>();
+  for (const row of rows) {
+    parentGroups.set(row.name.toLowerCase(), { name: row.name, childCount: row.child_count });
+  }
+
+  const seen = new Set<string>();
+  const warnings: string[] = [];
+  for (const tag of tags) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const match = parentGroups.get(key);
+    if (match) {
+      const noun = match.childCount === 1 ? "child tag" : "child tags";
+      warnings.push(
+        `Tag "${tag}" matches parent tag group "${match.name}" (${match.childCount} ${noun}) in Luminous. Direct tagging is allowed, but deleting this group in Luminous Tag Cleanup will remove the tag from all artist profiles.`
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Creates or updates an artist's profile (bio, website, tags, social links)
  * in the Luminous database.
  */
@@ -1035,63 +1085,75 @@ export function updateArtistProfile(
   assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
   assertNoDecadeTags(params.tags);
 
-  // Ensure table exists
-  db.run(`
-    CREATE TABLE IF NOT EXISTS artist_profiles (
-      artist_key TEXT PRIMARY KEY,
-      website TEXT,
-      tags TEXT NOT NULL DEFAULT '[]',
-      social_links TEXT NOT NULL DEFAULT '[]',
-      bio TEXT
-    );
-  `);
-  if (!hasColumn(db, "artist_profiles", "tags")) {
-    db.run(`ALTER TABLE artist_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
-  }
-  if (!hasColumn(db, "artist_profiles", "social_links")) {
-    db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
-  }
-
-  // Check existing row
-  const existing = db
-    .query<{ artist_key: string; website: string | null; tags: string; social_links: string; bio: string | null }, [string]>(
-      "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
-    )
-    .get(artistName);
-
-  const keyToUse = existing?.artist_key ?? artistName;
-  const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
-  const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
-  const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
-  const newSocial = effectiveSocial !== undefined
-    ? JSON.stringify(effectiveSocial)
-    : (existing?.social_links ?? "[]");
-
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.website !== undefined) fieldsUpdated.website = params.website;
   if (params.bio !== undefined) fieldsUpdated.bio = params.bio;
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
   if (effectiveSocial !== undefined) fieldsUpdated.social_links = effectiveSocial;
 
-  db.run(
-    `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
-     VALUES (?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT(artist_key) DO UPDATE SET
-       website = excluded.website,
-       tags = excluded.tags,
-       social_links = excluded.social_links,
-       bio = excluded.bio`,
-    [keyToUse, newWebsite, newTags, newSocial, newBio]
-  );
+  // Use an IMMEDIATE transaction so reading the existing row and upserting the
+  // merged profile are atomic against concurrent writes from Luminous desktop.
+  const tx = db.transaction(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS artist_profiles (
+        artist_key TEXT PRIMARY KEY,
+        website TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        social_links TEXT NOT NULL DEFAULT '[]',
+        bio TEXT
+      );
+    `);
+    if (!hasColumn(db, "artist_profiles", "tags")) {
+      db.run(`ALTER TABLE artist_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
+    }
+    if (!hasColumn(db, "artist_profiles", "social_links")) {
+      db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
+    }
 
-  const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
+    const existing = db
+      .query<{ artist_key: string; website: string | null; tags: string; social_links: string; bio: string | null }, [string]>(
+        "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
+      )
+      .get(artistName);
 
-  return {
+    const keyToUse = existing?.artist_key ?? artistName;
+    const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
+    const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
+    const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
+    const newSocial = effectiveSocial !== undefined
+      ? JSON.stringify(effectiveSocial)
+      : (existing?.social_links ?? "[]");
+
+    db.run(
+      `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
+       VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT(artist_key) DO UPDATE SET
+         website = excluded.website,
+         tags = excluded.tags,
+         social_links = excluded.social_links,
+         bio = excluded.bio`,
+      [keyToUse, newWebsite, newTags, newSocial, newBio]
+    );
+
+    const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
+    const warnings = findParentTagGroupWarnings(db, params.tags);
+
+    return { keyToUse, updatedProfile, warnings };
+  });
+
+  const { keyToUse, updatedProfile, warnings } = tx.immediate();
+
+  const result: UpdateArtistProfileResult = {
     success: true,
     artist: keyToUse,
     updated_fields: fieldsUpdated,
     profile: updatedProfile,
   };
+  if (warnings.length > 0) {
+    result.warnings = warnings;
+  }
+
+  return result;
 }
 
 interface RawAlbumProfile {
@@ -1461,73 +1523,6 @@ export function updateAlbumProfile(
     );
   }
 
-  // Ensure table exists
-  db.run(`
-    CREATE TABLE IF NOT EXISTS album_profiles (
-      album_key TEXT PRIMARY KEY,
-      artist_key TEXT,
-      description TEXT,
-      website TEXT,
-      tags TEXT NOT NULL DEFAULT '[]',
-      links TEXT NOT NULL DEFAULT '[]'
-    );
-  `);
-  if (!hasColumn(db, "album_profiles", "tags")) {
-    db.run(`ALTER TABLE album_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
-  }
-  if (!hasColumn(db, "album_profiles", "links")) {
-    db.run(`ALTER TABLE album_profiles ADD COLUMN links TEXT NOT NULL DEFAULT '[]';`);
-  }
-
-  // Check existing row
-  const hasSongsTable = hasTable(db, "songs");
-  const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
-  const compositeKeys = usesCompositeAlbumKeys(db);
-
-  let existing: RawAlbumProfile | null = null;
-  let keyToUse: string;
-
-  if (hasAlbumKeyCol) {
-    const songMatch = hasSongsTable
-      ? findSongForAlbum(db, albumName, params.artist, true, compositeKeys, false)
-      : null;
-
-    if (compositeKeys) {
-      keyToUse = params.artist?.trim()
-        ? albumKey(albumName, params.artist)
-        : (songMatch?.album_key ?? albumKey(albumName));
-    } else {
-      keyToUse = albumKey(albumName);
-    }
-
-    const candidates = [keyToUse, albumKey(albumName)];
-    existing = findExistingAlbumProfile(
-      db,
-      albumName,
-      candidates,
-      compositeKeys && !params.artist?.trim()
-    );
-    if (existing && !params.artist?.trim() && !songMatch?.album_key) {
-      keyToUse = existing.album_key;
-    }
-  } else {
-    existing = db
-      .query<RawAlbumProfile, [string]>(
-        "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
-      )
-      .get(albumName);
-    keyToUse = existing?.album_key ?? albumName;
-  }
-  const newArtist = params.artist !== undefined ? params.artist : (existing?.artist_key ?? null);
-  const newDescription =
-    params.description !== undefined ? params.description : (existing?.description ?? null);
-  const newWebsite =
-    params.website !== undefined ? params.website : (existing?.website ?? null);
-  const newTags =
-    params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
-  const newLinks =
-    params.links !== undefined ? JSON.stringify(params.links) : (existing?.links ?? "[]");
-
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.artist !== undefined) fieldsUpdated.artist = params.artist;
   if (params.description !== undefined) fieldsUpdated.description = params.description;
@@ -1535,23 +1530,95 @@ export function updateAlbumProfile(
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
   if (params.links !== undefined) fieldsUpdated.links = params.links;
 
-  db.run(
-    `INSERT INTO album_profiles (album_key, artist_key, description, website, tags, links)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-     ON CONFLICT(album_key) DO UPDATE SET
-       artist_key = excluded.artist_key,
-       description = excluded.description,
-       website = excluded.website,
-       tags = excluded.tags,
-       links = excluded.links`,
-    [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
-  );
+  // Use an IMMEDIATE transaction so reading the existing row and upserting the
+  // merged profile are atomic against concurrent writes from Luminous desktop.
+  const tx = db.transaction(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS album_profiles (
+        album_key TEXT PRIMARY KEY,
+        artist_key TEXT,
+        description TEXT,
+        website TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        links TEXT NOT NULL DEFAULT '[]'
+      );
+    `);
+    if (!hasColumn(db, "album_profiles", "tags")) {
+      db.run(`ALTER TABLE album_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
+    }
+    if (!hasColumn(db, "album_profiles", "links")) {
+      db.run(`ALTER TABLE album_profiles ADD COLUMN links TEXT NOT NULL DEFAULT '[]';`);
+    }
 
-  // Query using albumName (and artist when available) so getAlbumProfile resolves the exact profile
-  const updatedProfile = getAlbumProfile(db, {
-    album: albumName,
-    artist: newArtist ?? undefined,
-  })!;
+    const hasSongsTable = hasTable(db, "songs");
+    const hasAlbumKeyCol = hasSongsTable && hasColumn(db, "songs", "album_key");
+    const compositeKeys = usesCompositeAlbumKeys(db);
+
+    let existing: RawAlbumProfile | null = null;
+    let keyToUse: string;
+
+    if (hasAlbumKeyCol) {
+      const songMatch = hasSongsTable
+        ? findSongForAlbum(db, albumName, params.artist, true, compositeKeys, false)
+        : null;
+
+      if (compositeKeys) {
+        keyToUse = params.artist?.trim()
+          ? albumKey(albumName, params.artist)
+          : (songMatch?.album_key ?? albumKey(albumName));
+      } else {
+        keyToUse = albumKey(albumName);
+      }
+
+      const candidates = [keyToUse, albumKey(albumName)];
+      existing = findExistingAlbumProfile(
+        db,
+        albumName,
+        candidates,
+        compositeKeys && !params.artist?.trim()
+      );
+      if (existing && !params.artist?.trim() && !songMatch?.album_key) {
+        keyToUse = existing.album_key;
+      }
+    } else {
+      existing = db
+        .query<RawAlbumProfile, [string]>(
+          "SELECT album_key, artist_key, description, website, tags, links FROM album_profiles WHERE album_key = ?1 COLLATE NOCASE"
+        )
+        .get(albumName);
+      keyToUse = existing?.album_key ?? albumName;
+    }
+
+    const newArtist = params.artist !== undefined ? params.artist : (existing?.artist_key ?? null);
+    const newDescription =
+      params.description !== undefined ? params.description : (existing?.description ?? null);
+    const newWebsite =
+      params.website !== undefined ? params.website : (existing?.website ?? null);
+    const newTags =
+      params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
+    const newLinks =
+      params.links !== undefined ? JSON.stringify(params.links) : (existing?.links ?? "[]");
+
+    db.run(
+      `INSERT INTO album_profiles (album_key, artist_key, description, website, tags, links)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(album_key) DO UPDATE SET
+         artist_key = excluded.artist_key,
+         description = excluded.description,
+         website = excluded.website,
+         tags = excluded.tags,
+         links = excluded.links`,
+      [keyToUse, newArtist, newDescription, newWebsite, newTags, newLinks]
+    );
+
+    // Query using albumName (and artist when available) so getAlbumProfile resolves the exact profile
+    return getAlbumProfile(db, {
+      album: albumName,
+      artist: newArtist ?? undefined,
+    })!;
+  });
+
+  const updatedProfile = tx.immediate();
 
   return {
     success: true,
