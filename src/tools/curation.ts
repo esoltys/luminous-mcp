@@ -14,6 +14,7 @@ import {
   lookupMusicBrainz,
   updateAlbumProfile,
   updateArtistProfile,
+  updateArtistProfiles,
   updateTrackMetadata,
   type AuditMetadataOptions,
   type FindArtistsByTagOptions,
@@ -26,6 +27,9 @@ import {
 } from "../db/curation.ts";
 import { formatMcpResponse } from "../utils/response.ts";
 import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
+
+/** Max entries per update_artist_profiles call (bounds write-lock time and response size). */
+const MAX_ARTIST_PROFILE_BATCH = 500;
 
 const PROFILE_STATUS_ENTRIES = Object.entries(PROFILE_STATUS_DESCRIPTIONS);
 
@@ -384,6 +388,73 @@ export function registerCurationTools(
     }
   );
 
+  // Shared by update_artist_profile and each item of update_artist_profiles.
+  const artistProfileFields = {
+    artist: z.string().min(1).describe("Artist name whose profile is being updated"),
+    bio: z
+      .string()
+      .optional()
+      .describe(
+        "Biographical summary (~150-300 words). No track lists or discography enumeration. No Twitter/X links. " +
+          "Must end with a trailing 'Sources:' section listing every source used as a Markdown link on its own line, e.g.:\n\nSources:\n- [Wikipedia](https://...)\n- [AllMusic](https://...)"
+      ),
+    website: z.string().optional().describe("Official website URL for the artist"),
+    tags: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "REPLACES the artist's whole tag list. Curated artist-attribute tags only, e.g. nationality ('Canadian') and named awards/honors ('Grammy Award'). " +
+          "Never genre/style tags and never decade/era tags ('80s') - those are tracked or derivable elsewhere. " +
+          "To change a few tags without reading the profile first, use add_tags/remove_tags instead (cannot be combined with tags)."
+      ),
+    add_tags: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Tags to add to the existing list (case-insensitive, duplicates skipped, existing tags and order kept). Same rules as tags. Cannot be combined with tags."
+      ),
+    remove_tags: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Tags to remove from the existing list (case-insensitive; tags not present are ignored). Applied before add_tags. Cannot be combined with tags."
+      ),
+    social_links: z
+      .array(
+        z.union([
+          z.object({
+            platform: z.string().optional(),
+            handle_or_url: z.string().optional(),
+          }),
+          z.string(),
+        ])
+      )
+      .optional()
+      .describe(
+        "Official social media profile URLs or handles only (artist/label-controlled). No Twitter/X. No fan sites, unofficial wikis, or forums."
+      ),
+    links: z
+      .array(
+        z.union([
+          z.object({
+            platform: z.string().optional(),
+            handle_or_url: z.string().optional(),
+          }),
+          z.string(),
+        ])
+      )
+      .optional()
+      .describe(
+        "External links (alias for social_links) - official artist/label-controlled links only. No Twitter/X, fan sites, unofficial wikis, or forums."
+      ),
+    allow_unknown_artist: z
+      .boolean()
+      .optional()
+      .describe(
+        "Create a profile even if the name matches no library artist (default false). Unknown names are otherwise rejected with nearest-match suggestions; existing profiles are always editable."
+      ),
+  };
+
   server.registerTool(
     "update_artist_profile",
     {
@@ -392,59 +463,8 @@ export function registerCurationTools(
         "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
         "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
         "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
-        "tags/links rules below. Names matching no library artist (and with no existing profile) are rejected with nearest-match suggestions unless allow_unknown_artist is true; the result's `created` says whether a new profile was made.",
-      inputSchema: {
-      artist: z.string().min(1).describe("Artist name whose profile is being updated"),
-      bio: z
-        .string()
-        .optional()
-        .describe(
-          "Biographical summary (~150-300 words). No track lists or discography enumeration. No Twitter/X links. " +
-            "Must end with a trailing 'Sources:' section listing every source used as a Markdown link on its own line, e.g.:\n\nSources:\n- [Wikipedia](https://...)\n- [AllMusic](https://...)"
-        ),
-      website: z.string().optional().describe("Official website URL for the artist"),
-      tags: z
-        .array(z.string())
-        .optional()
-        .describe(
-          "Curated artist-attribute tags only, e.g. nationality ('Canadian') and named awards/honors ('Grammy Award'). " +
-            "Never genre/style tags and never decade/era tags ('80s') - those are tracked or derivable elsewhere."
-        ),
-      social_links: z
-        .array(
-          z.union([
-            z.object({
-              platform: z.string().optional(),
-              handle_or_url: z.string().optional(),
-            }),
-            z.string(),
-          ])
-        )
-        .optional()
-        .describe(
-          "Official social media profile URLs or handles only (artist/label-controlled). No Twitter/X. No fan sites, unofficial wikis, or forums."
-        ),
-      links: z
-        .array(
-          z.union([
-            z.object({
-              platform: z.string().optional(),
-              handle_or_url: z.string().optional(),
-            }),
-            z.string(),
-          ])
-        )
-        .optional()
-        .describe(
-          "External links (alias for social_links) - official artist/label-controlled links only. No Twitter/X, fan sites, unofficial wikis, or forums."
-        ),
-      allow_unknown_artist: z
-        .boolean()
-        .optional()
-        .describe(
-          "Create a profile even if the name matches no library artist (default false). Unknown names are otherwise rejected with nearest-match suggestions; existing profiles are always editable."
-        ),
-      },
+        "tags/links rules below. Use add_tags/remove_tags to edit a few tags without replacing the list (use update_artist_profiles for many artists at once). Names matching no library artist (and with no existing profile) are rejected with nearest-match suggestions unless allow_unknown_artist is true; the result's `created` says whether a new profile was made.",
+      inputSchema: artistProfileFields,
       annotations: WRITE_IDEMPOTENT,
     },
     async (params) => {
@@ -467,6 +487,8 @@ export function registerCurationTools(
           bio: params.bio,
           website: params.website,
           tags: params.tags,
+          add_tags: params.add_tags,
+          remove_tags: params.remove_tags,
           social_links: params.social_links as any,
           links: params.links as any,
           allow_unknown_artist: params.allow_unknown_artist,
@@ -490,6 +512,75 @@ export function registerCurationTools(
             {
               type: "text" as const,
               text: `Failed to update artist profile: ${err.message ?? String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  server.registerTool(
+    "update_artist_profiles",
+    {
+      title: "Update Artist Profiles (Batch)",
+      description:
+        `Apply profile updates to many artists in one call (max ${MAX_ARTIST_PROFILE_BATCH} per call; split larger jobs into chunks). ` +
+        "Each entry takes the same fields and rules as update_artist_profile (e.g. {artist, add_tags: ['Canadian']}). " +
+        "All entries are applied in one transaction, but a failing entry (unknown artist, invalid tag...) does not affect the others: " +
+        "the result lists, per artist, status 'created' | 'updated' | 'unchanged' | 'error' with the resulting tags or the error message. " +
+        "The Luminous UI is refreshed once for the whole batch.",
+      inputSchema: {
+        updates: z
+          .array(z.object(artistProfileFields))
+          .min(1)
+          .max(MAX_ARTIST_PROFILE_BATCH)
+          .describe(`Artist updates to apply (1-${MAX_ARTIST_PROFILE_BATCH} entries).`),
+        allow_unknown_artist: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default for entries that don't set allow_unknown_artist themselves: create profiles for names matching no library artist (default false)."
+          ),
+      },
+      annotations: WRITE_IDEMPOTENT,
+    },
+    async (params) => {
+      if (!db.exists()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Luminous database file not found at: "${db.dbPath}". Ensure Luminous Music Player is installed and has run at least once.`,
+            },
+          ],
+        };
+      }
+
+      try {
+        const result = updateArtistProfiles(db.getHandle(), params.updates as UpdateArtistProfileParams[], {
+          allow_unknown_artist: params.allow_unknown_artist,
+        });
+
+        // One notification for the whole batch, only if something actually changed.
+        const changedArtists = result.results
+          .filter((r) => r.status === "created" || r.status === "updated")
+          .map((r) => r.artist);
+        if (bridgeClient && changedArtists.length > 0) {
+          await bridgeClient.notifyEvent("library-changed", {
+            entity: "artist",
+            artists: changedArtists,
+          });
+        }
+
+        return formatMcpResponse(result);
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to update artist profiles: ${err.message ?? String(err)}`,
             },
           ],
         };
@@ -655,7 +746,9 @@ export function registerCurationTools(
             "put every citation/review/store link in the `links` array instead, so it renders in the app's UI."
         ),
       website: z.string().optional().describe("Official album landing page, Bandcamp URL, or release website"),
-      tags: z.array(z.string()).optional().describe("Curated tags or style descriptors for the album"),
+      tags: z.array(z.string()).optional().describe("REPLACES the album's whole tag list. Curated tags or style descriptors for the album. To change a few tags, use add_tags/remove_tags (cannot be combined with tags)."),
+      add_tags: z.array(z.string()).optional().describe("Tags to add to the existing list (case-insensitive, duplicates skipped). Cannot be combined with tags."),
+      remove_tags: z.array(z.string()).optional().describe("Tags to remove from the existing list (case-insensitive; absent tags ignored). Applied before add_tags. Cannot be combined with tags."),
       links: z
         .array(
           z.union([
@@ -697,6 +790,8 @@ export function registerCurationTools(
           description: params.description,
           website: params.website,
           tags: params.tags,
+          add_tags: params.add_tags,
+          remove_tags: params.remove_tags,
           links: params.links as any,
         };
 

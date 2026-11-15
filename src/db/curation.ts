@@ -159,7 +159,12 @@ export interface UpdateArtistProfileParams {
   artist: string;
   bio?: string | null;
   website?: string | null;
+  /** Replaces the whole tag list. Mutually exclusive with add_tags/remove_tags. */
   tags?: string[];
+  /** Tags to add (case-insensitive, order-preserving dedupe). Applied after remove_tags. */
+  add_tags?: string[];
+  /** Tags to remove (case-insensitive); absent tags are ignored. */
+  remove_tags?: string[];
   social_links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   /** Permit creating a profile for a name that matches no library artist. */
@@ -174,6 +179,27 @@ export interface UpdateArtistProfileResult {
   updated_fields: Record<string, unknown>;
   profile: ArtistProfile;
   warnings?: string[];
+}
+
+export type ArtistProfileBatchStatus = "created" | "updated" | "unchanged" | "error";
+
+export interface ArtistProfileBatchItem {
+  /** Library/stored spelling on success; the caller's input on error. */
+  artist: string;
+  status: ArtistProfileBatchStatus;
+  /** Resulting tag list on success. */
+  tags?: string[];
+  warnings?: string[];
+  error?: string;
+}
+
+export interface UpdateArtistProfilesResult {
+  success: true;
+  created: number;
+  updated: number;
+  unchanged: number;
+  errors: number;
+  results: ArtistProfileBatchItem[];
 }
 
 export interface AlbumLinkItem {
@@ -208,7 +234,12 @@ export interface UpdateAlbumProfileParams {
   artist?: string | null;
   description?: string | null;
   website?: string | null;
+  /** Replaces the whole tag list. Mutually exclusive with add_tags/remove_tags. */
   tags?: string[];
+  /** Tags to add (case-insensitive, order-preserving dedupe). Applied after remove_tags. */
+  add_tags?: string[];
+  /** Tags to remove (case-insensitive); absent tags are ignored. */
+  remove_tags?: string[];
   links?: Array<AlbumLinkItem | string>;
 }
 
@@ -1186,14 +1217,137 @@ function findParentTagGroupWarnings(db: Database, tags: string[] | undefined): s
   return warnings;
 }
 
+interface TagParams {
+  tags?: string[];
+  add_tags?: string[];
+  remove_tags?: string[];
+}
+
+function touchesTags(p: TagParams): boolean {
+  return p.tags !== undefined || p.add_tags !== undefined || p.remove_tags !== undefined;
+}
+
+function assertTagParams(p: TagParams): void {
+  if (p.tags !== undefined && (p.add_tags !== undefined || p.remove_tags !== undefined)) {
+    throw new Error(
+      "tags (replace the whole list) cannot be combined with add_tags/remove_tags. Use one or the other."
+    );
+  }
+  // Only tags being written are validated; remove_tags may name anything.
+  assertNoDecadeTags(p.tags ?? p.add_tags);
+}
+
+/**
+ * The tag list (as stored JSON) after applying `p` to `existingJson`.
+ * `tags` replaces; otherwise remove_tags is applied first, then add_tags, both
+ * case-insensitively. Adding keeps order and skips tags already present. If the
+ * list ends up equal to the stored one, the stored string is returned untouched
+ * so a no-op never rewrites the row.
+ */
+function applyTagParams(existingJson: string | null, p: TagParams): string {
+  if (p.tags !== undefined) return JSON.stringify(p.tags);
+  const stored = existingJson ?? "[]";
+  if (p.add_tags === undefined && p.remove_tags === undefined) return stored;
+
+  let current: string[] = [];
+  try {
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed)) current = parsed.filter((t): t is string => typeof t === "string");
+  } catch {
+    current = [];
+  }
+
+  const removeSet = new Set((p.remove_tags ?? []).map((t) => t.trim().toLowerCase()));
+  const next = current.filter((t) => !removeSet.has(t.trim().toLowerCase()));
+  const seen = new Set(next.map((t) => t.trim().toLowerCase()));
+  for (const raw of p.add_tags ?? []) {
+    const tag = raw.trim();
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    next.push(tag);
+  }
+
+  const unchanged = next.length === current.length && next.every((t, i) => t === current[i]);
+  return unchanged ? stored : JSON.stringify(next);
+}
+
+interface ArtistUpdateOutcome {
+  result: UpdateArtistProfileResult;
+  /** False when the write left the stored row identical (and it already existed). */
+  changed: boolean;
+}
+
 /**
  * Creates or updates an artist's profile (bio, website, tags, social links)
- * in the Luminous database.
+ * in the Luminous database. Tags can be replaced (`tags`) or edited in place
+ * (`add_tags` / `remove_tags`); the read-modify-write is one IMMEDIATE
+ * transaction, atomic against concurrent writes from Luminous desktop.
  */
 export function updateArtistProfile(
   db: Database,
   params: UpdateArtistProfileParams
 ): UpdateArtistProfileResult {
+  return db.transaction(() => applyArtistProfileUpdate(db, params)).immediate().result;
+}
+
+/**
+ * Applies several artist profile updates in one IMMEDIATE transaction. Each item
+ * runs in its own savepoint, so an invalid item (unknown artist, bad tags...)
+ * is reported in its slot and rolled back without affecting the others.
+ * `allow_unknown_artist` on the call is the default for items that don't set it.
+ */
+export function updateArtistProfiles(
+  db: Database,
+  updates: UpdateArtistProfileParams[],
+  defaults: { allow_unknown_artist?: boolean } = {}
+): UpdateArtistProfilesResult {
+  if (updates.length === 0) {
+    throw new Error("updates must contain at least one artist update.");
+  }
+
+  const results = db
+    .transaction(() =>
+      updates.map((update): ArtistProfileBatchItem => {
+        const params = {
+          ...update,
+          allow_unknown_artist: update.allow_unknown_artist ?? defaults.allow_unknown_artist,
+        };
+        try {
+          const { result, changed } = db.transaction(() => applyArtistProfileUpdate(db, params))();
+          return {
+            artist: result.artist,
+            status: result.created ? "created" : changed ? "updated" : "unchanged",
+            tags: result.profile.tags,
+            warnings: result.warnings,
+          };
+        } catch (err: any) {
+          return {
+            artist: update.artist,
+            status: "error",
+            error: err?.message ?? String(err),
+          };
+        }
+      })
+    )
+    .immediate();
+
+  const count = (status: ArtistProfileBatchStatus) =>
+    results.filter((r) => r.status === status).length;
+  return {
+    success: true,
+    created: count("created"),
+    updated: count("updated"),
+    unchanged: count("unchanged"),
+    errors: count("error"),
+    results,
+  };
+}
+
+/** Body of an artist update; must run inside a transaction (see callers). */
+function applyArtistProfileUpdate(
+  db: Database,
+  params: UpdateArtistProfileParams
+): ArtistUpdateOutcome {
   const artistName = params.artist?.trim();
   if (!artistName) {
     throw new Error("Artist name must not be empty.");
@@ -1204,26 +1358,26 @@ export function updateArtistProfile(
   if (
     params.bio === undefined &&
     params.website === undefined &&
-    params.tags === undefined &&
+    !touchesTags(params) &&
     effectiveSocial === undefined
   ) {
     throw new Error(
-      "At least one profile field (bio, website, tags, social_links) must be provided."
+      "At least one profile field (bio, website, tags, add_tags, remove_tags, social_links) must be provided."
     );
   }
 
   assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
-  assertNoDecadeTags(params.tags);
+  assertTagParams(params);
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.website !== undefined) fieldsUpdated.website = params.website;
   if (params.bio !== undefined) fieldsUpdated.bio = params.bio;
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
+  if (params.add_tags !== undefined) fieldsUpdated.add_tags = params.add_tags;
+  if (params.remove_tags !== undefined) fieldsUpdated.remove_tags = params.remove_tags;
   if (effectiveSocial !== undefined) fieldsUpdated.social_links = effectiveSocial;
 
-  // Use an IMMEDIATE transaction so reading the existing row and upserting the
-  // merged profile are atomic against concurrent writes from Luminous desktop.
-  const tx = db.transaction(() => {
+  {
     db.run(`
       CREATE TABLE IF NOT EXISTS artist_profiles (
         artist_key TEXT PRIMARY KEY COLLATE NOCASE,
@@ -1264,7 +1418,7 @@ export function updateArtistProfile(
     const keyToUse = existing?.artist_key ?? libraryName ?? artistName;
     const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
     const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
-    const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
+    const newTags = applyTagParams(existing?.tags ?? null, params);
     const newSocial = effectiveSocial !== undefined
       ? JSON.stringify(effectiveSocial)
       : (existing?.social_links ?? "[]");
@@ -1281,25 +1435,27 @@ export function updateArtistProfile(
     );
 
     const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
-    const warnings = findParentTagGroupWarnings(db, params.tags);
+    const warnings = findParentTagGroupWarnings(db, params.tags ?? params.add_tags);
 
-    return { keyToUse, created: !existing, updatedProfile, warnings };
-  });
+    const result: UpdateArtistProfileResult = {
+      success: true,
+      artist: updatedProfile.artist,
+      created: !existing,
+      updated_fields: fieldsUpdated,
+      profile: updatedProfile,
+    };
+    if (warnings.length > 0) {
+      result.warnings = warnings;
+    }
 
-  const { created, updatedProfile, warnings } = tx.immediate();
-
-  const result: UpdateArtistProfileResult = {
-    success: true,
-    artist: updatedProfile.artist,
-    created,
-    updated_fields: fieldsUpdated,
-    profile: updatedProfile,
-  };
-  if (warnings.length > 0) {
-    result.warnings = warnings;
+    const changed =
+      !existing ||
+      newWebsite !== existing.website ||
+      newBio !== existing.bio ||
+      newTags !== existing.tags ||
+      newSocial !== existing.social_links;
+    return { result, changed };
   }
-
-  return result;
 }
 
 interface RawAlbumProfile {
@@ -1660,20 +1816,23 @@ export function updateAlbumProfile(
   if (
     params.description === undefined &&
     params.website === undefined &&
-    params.tags === undefined &&
+    !touchesTags(params) &&
     params.links === undefined &&
     params.artist === undefined
   ) {
     throw new Error(
-      "At least one profile field (description, website, tags, links, artist) must be provided."
+      "At least one profile field (description, website, tags, add_tags, remove_tags, links, artist) must be provided."
     );
   }
+  assertTagParams(params);
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.artist !== undefined) fieldsUpdated.artist = params.artist;
   if (params.description !== undefined) fieldsUpdated.description = params.description;
   if (params.website !== undefined) fieldsUpdated.website = params.website;
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
+  if (params.add_tags !== undefined) fieldsUpdated.add_tags = params.add_tags;
+  if (params.remove_tags !== undefined) fieldsUpdated.remove_tags = params.remove_tags;
   if (params.links !== undefined) fieldsUpdated.links = params.links;
 
   // Use an IMMEDIATE transaction so reading the existing row and upserting the
@@ -1740,8 +1899,7 @@ export function updateAlbumProfile(
       params.description !== undefined ? params.description : (existing?.description ?? null);
     const newWebsite =
       params.website !== undefined ? params.website : (existing?.website ?? null);
-    const newTags =
-      params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
+    const newTags = applyTagParams(existing?.tags ?? null, params);
     const newLinks =
       params.links !== undefined ? JSON.stringify(params.links) : (existing?.links ?? "[]");
 
