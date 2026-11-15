@@ -18,6 +18,7 @@ import {
   lookupMusicBrainz,
   updateAlbumProfile,
   updateArtistProfile,
+  updateArtistProfiles,
   updateTrackMetadata,
 } from "../src/db/curation.ts";
 import { createMcpServer } from "../src/server.ts";
@@ -765,6 +766,137 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       updateArtistProfile(db, { artist: "Lola Young", bio: "x", allow_unknown_artist: true });
       const res = updateArtistProfile(db, { artist: "Lola Young", bio: "y" });
       expect(res.created).toBe(false);
+      db.close();
+    });
+  });
+
+  describe("tag add/remove and batch updates", () => {
+    it("add_tags/remove_tags leave other tags and fields untouched", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["Canadian"], remove_tags: ["ambient"] });
+      expect(res.profile.tags).toEqual(["progressive metal", "Canadian"]);
+      expect(res.profile.website).toBe("https://cleanartist.example.com");
+      expect(res.profile.bio).toContain("acclaimed");
+      expect(res.profile.social_links.length).toBe(1);
+      db.close();
+    });
+
+    it("adds case-insensitively without duplicates, keeping order; removal of an absent tag is a no-op", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateArtistProfile(db, {
+        artist: "Clean Artist",
+        add_tags: ["AMBIENT", "Canadian", "canadian", "  "],
+        remove_tags: ["nonexistent", "PROGRESSIVE METAL"],
+      });
+      expect(res.profile.tags).toEqual(["ambient", "Canadian"]);
+      db.close();
+    });
+
+    it("removes then adds, so a tag in both lists ends up present with the added spelling", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["Ambient"], remove_tags: ["ambient"] });
+      expect(res.profile.tags).toEqual(["progressive metal", "Ambient"]);
+      db.close();
+    });
+
+    it("creates a profile from add_tags alone for a library artist", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run(`INSERT INTO songs (title, artist, album_artist, album, path) VALUES ('A','Lola Young','Lola Young','M','/m/1.mp3');`);
+      const res = updateArtistProfile(db, { artist: "Lola Young", add_tags: ["British"] });
+      expect(res.created).toBe(true);
+      expect(res.profile.tags).toEqual(["British"]);
+      db.close();
+    });
+
+    it("rejects combining tags with add_tags/remove_tags, and keeps tags replace behavior", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      expect(() => updateArtistProfile(db, { artist: "Clean Artist", tags: ["a"], add_tags: ["b"] })).toThrow(/cannot be combined/);
+      expect(() => updateArtistProfile(db, { artist: "Clean Artist", tags: ["a"], remove_tags: ["b"] })).toThrow(/cannot be combined/);
+      expect(updateArtistProfile(db, { artist: "Clean Artist", tags: ["only"] }).profile.tags).toEqual(["only"]);
+      db.close();
+    });
+
+    it("validates decade tags on add_tags but not remove_tags", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      expect(() => updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["80s"] })).toThrow(/Decade/);
+      expect(() => updateArtistProfile(db, { artist: "Clean Artist", remove_tags: ["80s"] })).not.toThrow();
+      db.close();
+    });
+
+    it("warns about parent tag groups for add_tags", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run(`
+        CREATE TABLE artist_tag_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          is_custom INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE artist_tag_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          group_id INTEGER NOT NULL REFERENCES artist_tag_groups(id) ON DELETE CASCADE
+        );
+      `);
+      db.run(`INSERT INTO artist_tag_groups (id, name, is_custom) VALUES (1, 'Award-Winning', 1)`);
+      db.run(`INSERT INTO artist_tag_assignments (tag_name, group_id) VALUES ('Grammy Award', 1)`);
+      const res = updateArtistProfile(db, { artist: "Clean Artist", add_tags: ["award-winning"] });
+      expect(res.warnings?.[0]).toContain("Award-Winning");
+      db.close();
+    });
+
+    it("update_album_profile supports add_tags/remove_tags and rejects mixing with tags", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateAlbumProfile(db, { album: "Clean Album", artist: "Clean Artist", add_tags: ["Live"], remove_tags: ["REMASTER"] });
+      expect(res.profile.tags).toEqual(["concept album", "Live"]);
+      expect(() => updateAlbumProfile(db, { album: "Clean Album", artist: "Clean Artist", tags: ["a"], add_tags: ["b"] })).toThrow(/cannot be combined/);
+      db.close();
+    });
+
+    it("batch reports per-artist outcomes and rolls back only failed items", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run(`INSERT INTO songs (title, artist, album_artist, album, path) VALUES ('A','Lola Young','Lola Young','M','/m/1.mp3');`);
+      const res = updateArtistProfiles(db, [
+        { artist: "Clean Artist", add_tags: ["ambient"] }, // already present -> unchanged
+        { artist: "lola young", add_tags: ["British"] }, // created
+        { artist: "Clean Artist", add_tags: ["Canadian"] }, // updated
+        { artist: "Nobody", add_tags: ["x"] }, // unknown -> error
+        { artist: "Lola Young", add_tags: ["80s"] }, // invalid -> error, rolled back
+        { artist: "Lola Young", tags: ["a"], remove_tags: ["b"] }, // invalid mix -> error
+      ]);
+      expect(res.results.map((r) => r.status)).toEqual(["unchanged", "created", "updated", "error", "error", "error"]);
+      expect(res).toMatchObject({ created: 1, updated: 1, unchanged: 1, errors: 3 });
+      expect(res.results[3].error).toContain("matches no artist");
+      expect(res.results[1].artist).toBe("Lola Young");
+      const tags = (k: string) =>
+        JSON.parse(db.query<{ tags: string }, [string]>("SELECT tags FROM artist_profiles WHERE artist_key = ?1").get(k)!.tags);
+      expect(tags("Clean Artist")).toEqual(["progressive metal", "ambient", "Canadian"]);
+      expect(tags("Lola Young")).toEqual(["British"]);
+      expect(db.query("SELECT 1 FROM artist_profiles WHERE artist_key = 'Nobody'").all().length).toBe(0);
+      db.close();
+    });
+
+    it("batch leaves no transaction open after committing", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateArtistProfiles(db, [{ artist: "Clean Artist", website: "https://a.example" }], {});
+      expect(res.updated).toBe(1);
+      expect(db.inTransaction).toBe(false);
+      db.close();
+    });
+
+    it("batch allow_unknown_artist default applies unless an item overrides it", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      const res = updateArtistProfiles(
+        db,
+        [{ artist: "Ghost A", add_tags: ["x"] }, { artist: "Ghost B", add_tags: ["x"], allow_unknown_artist: false }],
+        { allow_unknown_artist: true }
+      );
+      expect(res.results.map((r) => r.status)).toEqual(["created", "error"]);
+      db.close();
+    });
+
+    it("rejects an empty batch", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      expect(() => updateArtistProfiles(db, [])).toThrow(/at least one/);
       db.close();
     });
   });
@@ -1672,9 +1804,11 @@ describe("MCP Curation Tools Integration", () => {
     let mockServer: any;
     let mockBaseUrl: string;
     let lastReceivedEvent: { event: string; data?: any } | null = null;
+    let allReceivedEvents: Array<{ event: string; data?: any }> = [];
 
     beforeEach(() => {
       lastReceivedEvent = null;
+      allReceivedEvents = [];
       mockServer = Bun.serve({
         port: 0,
         fetch(req) {
@@ -1682,6 +1816,7 @@ describe("MCP Curation Tools Integration", () => {
           if (url.pathname === "/events/notify" && req.method === "POST") {
             return req.json().then((body: any) => {
               lastReceivedEvent = body;
+              allReceivedEvents.push(body);
               return new Response(JSON.stringify({ success: true }), {
                 headers: { "Content-Type": "application/json" },
               });
@@ -1698,6 +1833,60 @@ describe("MCP Curation Tools Integration", () => {
 
     afterEach(() => {
       mockServer?.stop(true);
+    });
+
+    it("sends exactly one library-changed event for an update_artist_profiles batch, and none when nothing changed", async () => {
+      setupCurationTestDb(tempDbPath);
+      const bridgeClient = new LuminousBridgeClient({ baseUrl: mockBaseUrl });
+      const { server } = createMcpServer({ dbPath: tempDbPath, bridgeClient });
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "batch-sync-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+
+      const res = await client.callTool({
+        name: "update_artist_profiles",
+        arguments: {
+          updates: [
+            { artist: "Clean Artist", add_tags: ["Canadian"] },
+            { artist: "Batch One", add_tags: ["x"] },
+            { artist: "Batch Two", add_tags: ["y"] },
+          ],
+          allow_unknown_artist: true,
+        },
+      });
+      const parsed = JSON.parse(getTextContent(res).text);
+      expect(parsed.created).toBe(2);
+      expect(parsed.updated).toBe(1);
+      expect(allReceivedEvents.length).toBe(1);
+      expect(allReceivedEvents[0].data.entity).toBe("artist");
+      expect(allReceivedEvents[0].data.artists).toEqual(["Clean Artist", "Batch One", "Batch Two"]);
+
+      allReceivedEvents = [];
+      await client.callTool({
+        name: "update_artist_profiles",
+        arguments: { updates: [{ artist: "Clean Artist", add_tags: ["Canadian"] }] },
+      });
+      expect(allReceivedEvents.length).toBe(0);
+    });
+
+    it("rejects an oversized update_artist_profiles batch with a message naming the cap", async () => {
+      setupCurationTestDb(tempDbPath);
+      const { server } = createMcpServer({ dbPath: tempDbPath });
+      const [cTrans, sTrans] = InMemoryTransport.createLinkedPair();
+      await server.connect(sTrans);
+      const client = new Client({ name: "cap-test", version: "1.0.0" }, { capabilities: {} });
+      await client.connect(cTrans);
+      const tools = await client.listTools();
+      const batchTool = tools.tools.find((t) => t.name === "update_artist_profiles")!;
+      expect(batchTool.description).toContain("max 500");
+      expect((batchTool.inputSchema as any).properties.updates.maxItems).toBe(500);
+      const res = await client.callTool({
+        name: "update_artist_profiles",
+        arguments: { updates: Array.from({ length: 501 }, (_, i) => ({ artist: `A${i}`, add_tags: ["x"] })) },
+      });
+      expect((res as any).isError).toBe(true);
+      expect(getTextContent(res).text).toMatch(/500/);
     });
 
     it("triggers library-changed notification on update_artist_profile", async () => {
