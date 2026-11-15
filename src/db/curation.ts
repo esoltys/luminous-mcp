@@ -123,7 +123,10 @@ export interface BioSourceLink {
 }
 
 export interface ArtistProfile {
+  /** Library spelling when the artist is in the library, else the stored key. */
   artist: string;
+  /** Stored profile key, only present when it differs from `artist`. */
+  stored_artist_key?: string;
   bio: string | null;
   website: string | null;
   tags: string[];
@@ -817,8 +820,42 @@ export function updateTrackMetadata(
 }
 
 /**
+ * Returns the library's spelling of an artist (the most common `songs.artist` /
+ * `songs.album_artist` value that matches `name` case-insensitively), or null
+ * when the library has no such artist. Ties break on the binary-smallest value
+ * so the result is deterministic.
+ *
+ * Luminous keys `artist_profiles` case-insensitively and stores the library's
+ * spelling, so this is the spelling callers should see and new keys should use.
+ */
+function resolveLibraryArtistName(db: Database, name: string): string | null {
+  if (!hasTable(db, "songs")) return null;
+  const hasAlbumArtist = hasColumn(db, "songs", "album_artist");
+  const albumArtistUnion = hasAlbumArtist
+    ? "UNION ALL SELECT album_artist FROM songs WHERE album_artist = ?1 COLLATE NOCASE"
+    : "";
+  const row = db
+    .query<{ name: string }, [string]>(
+      `SELECT v AS name FROM (
+         SELECT artist AS v FROM songs WHERE artist = ?1 COLLATE NOCASE
+         ${albumArtistUnion}
+       )
+       GROUP BY v COLLATE BINARY
+       ORDER BY COUNT(*) DESC, v COLLATE BINARY ASC
+       LIMIT 1`
+    )
+    .get(name);
+  return row?.name ?? null;
+}
+
+/**
  * Retrieves an artist's curated profile (bio, website, tags, social links)
  * and Wikipedia context enrichment from the database.
+ *
+ * `artist` is the library's spelling when the library has the artist. If the
+ * stored profile key still differs from it (e.g. a profile written before
+ * Luminous canonicalized keys), the stored spelling is exposed as
+ * `stored_artist_key`.
  */
 export function getArtistProfile(
   db: Database,
@@ -838,7 +875,7 @@ export function getArtistProfile(
     if (artistName && !mbid) {
       const songRow = db
         .query<{ musicbrainz_artist_id: string | null }, [string, string]>(
-          "SELECT musicbrainz_artist_id FROM songs WHERE (artist = ?1 OR album_artist = ?2) LIMIT 1"
+          "SELECT musicbrainz_artist_id FROM songs WHERE (artist = ?1 COLLATE NOCASE OR album_artist = ?2 COLLATE NOCASE) LIMIT 1"
         )
         .get(artistName, artistName);
       if (songRow) {
@@ -859,6 +896,9 @@ export function getArtistProfile(
       }
     }
   }
+
+  const libraryName =
+    songArtistFound && resolvedArtistName ? resolveLibraryArtistName(db, resolvedArtistName) : null;
 
   // Check artist_profiles table
   interface RawProfile {
@@ -922,8 +962,14 @@ export function getArtistProfile(
 
   const bioSources = extractBioLinks(rawProfile?.bio);
 
+  // Library spelling wins; fall back to the stored key, then the caller's input.
+  const displayName = libraryName ?? rawProfile?.artist_key ?? resolvedArtistName;
+  const storedKey =
+    rawProfile && rawProfile.artist_key !== displayName ? rawProfile.artist_key : undefined;
+
   return {
-    artist: rawProfile?.artist_key ?? resolvedArtistName,
+    artist: displayName,
+    stored_artist_key: storedKey,
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
@@ -1096,7 +1142,7 @@ export function updateArtistProfile(
   const tx = db.transaction(() => {
     db.run(`
       CREATE TABLE IF NOT EXISTS artist_profiles (
-        artist_key TEXT PRIMARY KEY,
+        artist_key TEXT PRIMARY KEY COLLATE NOCASE,
         website TEXT,
         tags TEXT NOT NULL DEFAULT '[]',
         social_links TEXT NOT NULL DEFAULT '[]',
@@ -1116,7 +1162,11 @@ export function updateArtistProfile(
       )
       .get(artistName);
 
-    const keyToUse = existing?.artist_key ?? artistName;
+    // An existing row keeps its stored key: Luminous keys profiles
+    // case-insensitively and rewrites a stale spelling on its own next save, so
+    // renaming here would only race the app. New rows use the library's
+    // spelling, falling back to the caller's input for artists not in the library.
+    const keyToUse = existing?.artist_key ?? resolveLibraryArtistName(db, artistName) ?? artistName;
     const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
     const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
     const newTags = params.tags !== undefined ? JSON.stringify(params.tags) : (existing?.tags ?? "[]");
@@ -1145,7 +1195,7 @@ export function updateArtistProfile(
 
   const result: UpdateArtistProfileResult = {
     success: true,
-    artist: keyToUse,
+    artist: updatedProfile.artist,
     updated_fields: fieldsUpdated,
     profile: updatedProfile,
   };
