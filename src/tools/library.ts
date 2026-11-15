@@ -20,13 +20,17 @@ export function registerLibraryTools(server: McpServer, db: LuminousDatabase): v
     {
       title: "List Artists",
       description:
-        "List every artist in the library (paginated), regardless of play count or year. A name counts if it appears in a track's artist or album_artist (case-insensitive). Returns canonical name, track_count and has_profile (curated profile exists) so curation gaps are one call away. Compound credits like 'A feat. B' appear as their own entry.",
+        "List every artist in the library (paginated), regardless of play count or year. A name counts if it appears in a track's artist or album_artist (case-insensitive). Returns canonical name, track_count, has_profile (curated profile exists) and country (profile's alpha-2 code plus country_name, when set) so curation gaps are one call away. Compound credits like 'A feat. B' appear as their own entry.",
       inputSchema: {
       has_profile: z
         .boolean()
         .optional()
         .describe("true: only artists with a curated profile; false: only artists without one"),
       name: z.string().optional().describe("Case-insensitive substring of the artist name"),
+      country: z
+        .string()
+        .optional()
+        .describe("ISO 3166-1 alpha-2 code, e.g. 'CA': only artists whose profile has this country"),
       sort: z
         .enum(["name", "track_count"])
         .default("name")

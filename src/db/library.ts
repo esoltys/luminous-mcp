@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { countryDisplayName, normalizeCountryCode } from "./country.ts";
 import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
 /**
@@ -749,6 +750,8 @@ export interface ListArtistsOptions {
   has_profile?: boolean;
   /** Case-insensitive substring of the artist name. Blank is ignored. */
   name?: string;
+  /** ISO 3166-1 alpha-2 code (case-insensitive); only artists whose profile has this country. */
+  country?: string;
   /** "name" (default, A-Z) or "track_count" (most tracks first). Ties break by name. */
   sort?: "name" | "track_count";
   limit?: number;
@@ -759,6 +762,9 @@ export interface ArtistListItem {
   artist: string;
   track_count: number;
   has_profile: boolean;
+  /** Alpha-2 code from the artist's profile, when set. */
+  country?: string;
+  country_name?: string;
 }
 
 export interface ListArtistsResult {
@@ -787,6 +793,7 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
   const offset = Math.max(0, options.offset ?? 0);
   const sort = options.sort ?? "name";
   const nameFilter = options.name?.trim();
+  const countryFilter = options.country?.trim() ? normalizeCountryCode(options.country) : undefined;
 
   const songWhere = librarySongWhere(db, "s");
   const nameSources = [
@@ -804,8 +811,14 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
   // each artist. A set also keeps case-variant profile rows from duplicating
   // an artist. Tolerates older artist_profiles schemas.
   let profiledNamesSql = "SELECT NULL AS key WHERE 0";
+  let profileCountriesSql = "SELECT NULL AS key, NULL AS country WHERE 0";
   if (hasTable(db, "artist_profiles")) {
     const nonEmpty = ["COALESCE(TRIM(bio), '') != ''", "COALESCE(TRIM(website), '') != ''"];
+    if (hasColumn(db, "artist_profiles", "country")) {
+      nonEmpty.push("COALESCE(TRIM(country), '') != ''");
+      profileCountriesSql = `SELECT LOWER(artist_key) AS key, MAX(UPPER(TRIM(country))) AS country
+        FROM artist_profiles WHERE COALESCE(TRIM(country), '') != '' GROUP BY LOWER(artist_key)`;
+    }
     for (const col of ["tags", "social_links"]) {
       if (hasColumn(db, "artist_profiles", col)) {
         nonEmpty.push(`COALESCE(TRIM(${col}), '') NOT IN ('', '[]')`);
@@ -818,6 +831,9 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
   if (nameFilter) {
     bindings.$name = `%${nameFilter.replace(/[\\%_]/g, "\\$&")}%`;
   }
+  if (countryFilter) {
+    bindings.$country = countryFilter;
+  }
 
   const filteredArtistsSql = `
     WITH names AS (${nameSources.join(" UNION ")}),
@@ -826,13 +842,18 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
       FROM names GROUP BY name COLLATE NOCASE
     ),
     profiled AS (${profiledNamesSql}),
+    profile_countries AS (${profileCountriesSql}),
     artists AS (
       SELECT grouped.name AS name, grouped.track_count AS track_count,
-             LOWER(grouped.name) IN (SELECT key FROM profiled) AS has_profile
+             LOWER(grouped.name) IN (SELECT key FROM profiled) AS has_profile,
+             profile_countries.country AS country
       FROM grouped
-      ${nameFilter ? "WHERE grouped.name LIKE $name ESCAPE '\\'" : ""}
+      LEFT JOIN profile_countries ON profile_countries.key = LOWER(grouped.name)
+      WHERE 1 = 1
+      ${nameFilter ? "AND grouped.name LIKE $name ESCAPE '\\'" : ""}
+      ${countryFilter ? "AND profile_countries.country = $country" : ""}
     )
-    SELECT name, track_count, has_profile FROM artists
+    SELECT name, track_count, has_profile, country FROM artists
     ${options.has_profile !== undefined ? `WHERE has_profile = ${options.has_profile ? 1 : 0}` : ""}`;
 
   const orderBy =
@@ -846,7 +867,7 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
       .get(bindings)?.n ?? 0;
 
   const rows = db
-    .query<{ name: string; track_count: number; has_profile: number }, any>(
+    .query<{ name: string; track_count: number; has_profile: number; country: string | null }, any>(
       `${filteredArtistsSql} ${orderBy} LIMIT $limit OFFSET $offset`
     )
     .all({ ...bindings, $limit: limit, $offset: offset });
@@ -856,6 +877,8 @@ export function listArtists(db: Database, options: ListArtistsOptions = {}): Lis
       artist: r.name,
       track_count: r.track_count,
       has_profile: r.has_profile === 1,
+      country: r.country ?? undefined,
+      country_name: countryDisplayName(r.country),
     })),
     pagination: {
       total_matching: total,

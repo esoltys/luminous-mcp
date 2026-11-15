@@ -83,7 +83,7 @@ Luminous MCP implements strict token-efficiency and context window optimization 
 | **Search Detail Levels** | `search_library` defaults to compact essential fields (`id`, `title`, `artist`, `album`, `year`, `duration_seconds`); `detail_level: "full"` on demand | **50%–70% reduction** on search listings |
 | **Metric Deduplication** | Canonical ISO 8601 timestamps (`last_played_iso`, `played_at_iso`), single float ratios (`skip_ratio`), and seconds durations (`duration_seconds`) | **15%–20% reduction** on analytics and history queries |
 | **Bounded Collections** | Caps artist summary entity lists (`collaborators`, `composers`, `producers`) to top 20 frequency-ranked entries, while returning total counts | Prevents **1,000–3,000+ token explosions** on prolific artists |
-| **Offset Pagination** | Incremental `limit` & `offset` pagination with `total_matches` and `has_more` metadata for `search_library`, `get_recent_history`, `find_artists_by_tag` and `list_artists` (full-library artist enumeration with `has_profile` curation flag) | Eliminates redundant page re-fetching during multi-turn exploration |
+| **Offset Pagination** | Incremental `limit` & `offset` pagination with `total_matches` and `has_more` metadata for `search_library`, `get_recent_history`, `find_artists_by_tag` and `list_artists` (full-library artist enumeration with `has_profile` curation flag and `country` filter) | Eliminates redundant page re-fetching during multi-turn exploration |
 
 ## Getting Started
 

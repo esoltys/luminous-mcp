@@ -399,6 +399,14 @@ export function registerCurationTools(
           "Must end with a trailing 'Sources:' section listing every source used as a Markdown link on its own line, e.g.:\n\nSources:\n- [Wikipedia](https://...)\n- [AllMusic](https://...)"
       ),
     website: z.string().optional().describe("Official website URL for the artist"),
+    country: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Artist's country as an ISO 3166-1 alpha-2 code, e.g. 'CA' (case-insensitive, stored uppercase). Names, cities and three-letter codes are rejected. null clears it. " +
+          "Luminous also fills a blank one from MusicBrainz and never overwrites a value set here; read it back from get_artist_profile."
+      ),
     tags: z
       .array(z.string())
       .optional()
@@ -460,7 +468,7 @@ export function registerCurationTools(
     {
       title: "Update Artist Profile",
       description:
-        "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
+        "Update or create an artist's curated profile (biography, official website URL, country code, tags, social media / external source links) in the Luminous database. " +
         "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
         "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
         "tags/links rules below. Use add_tags/remove_tags to edit a few tags without replacing the list (use update_artist_profiles for many artists at once). Names matching no library artist (and with no existing profile) are rejected with nearest-match suggestions unless allow_unknown_artist is true; the result's `created` says whether a new profile was made.",
@@ -486,6 +494,7 @@ export function registerCurationTools(
           artist: params.artist,
           bio: params.bio,
           website: params.website,
+          country: params.country,
           tags: params.tags,
           add_tags: params.add_tags,
           remove_tags: params.remove_tags,

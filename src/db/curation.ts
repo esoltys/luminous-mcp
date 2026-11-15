@@ -6,6 +6,7 @@ import {
   isCompositeAlbumKey,
   sameAlbum,
 } from "../utils/albumKey.ts";
+import { countryDisplayName, normalizeCountryCode } from "./country.ts";
 import { hasColumn, hasTable, librarySongWhere } from "./filters.ts";
 
 export { albumKey, albumKeyForTrack, hasColumn, hasTable, sameAlbum };
@@ -144,6 +145,10 @@ export interface ArtistProfile {
   bio: string | null;
   website: string | null;
   tags: string[];
+  /** ISO 3166-1 alpha-2 code stored on the profile; absent when unset or the database predates the column. */
+  country?: string;
+  /** English display name for `country`. */
+  country_name?: string;
   social_links: Array<{ platform?: string; handle_or_url?: string } | string>;
   sources?: BioSourceLink[];
   wikipedia: {
@@ -169,6 +174,8 @@ export interface UpdateArtistProfileParams extends TagParams {
   artist: string;
   bio?: string | null;
   website?: string | null;
+  /** ISO 3166-1 alpha-2 code (case-insensitive input, stored uppercase); null clears it. */
+  country?: string | null;
   social_links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   /** Permit creating a profile for a name that matches no library artist. */
@@ -1019,6 +1026,7 @@ export function getArtistProfile(
     tags: string;
     social_links: string;
     bio: string | null;
+    country: string | null;
   }
 
   let rawProfile: RawProfile | null = null;
@@ -1026,7 +1034,7 @@ export function getArtistProfile(
     if (resolvedArtistName) {
       rawProfile = db
         .query<RawProfile, [string]>(
-          "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
+          `SELECT artist_key, website, tags, social_links, bio, ${countrySelectExpr(db)} FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE`
         )
         .get(resolvedArtistName);
     }
@@ -1086,6 +1094,8 @@ export function getArtistProfile(
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
+    country: rawProfile?.country || undefined,
+    country_name: countryDisplayName(rawProfile?.country),
     social_links: parsedSocial,
     sources: bioSources.length > 0 ? bioSources : undefined,
     wikipedia: rawContext
@@ -1098,6 +1108,15 @@ export function getArtistProfile(
       : null,
     musicbrainz_artist_id: mbid,
   };
+}
+
+/**
+ * SELECT expression for `artist_profiles.country`. Databases created by a
+ * Luminous release older than migration 84 lack the column; reading it then
+ * yields NULL instead of failing.
+ */
+function countrySelectExpr(db: Database): string {
+  return hasColumn(db, "artist_profiles", "country") ? "country" : "NULL AS country";
 }
 
 const TWITTER_X_URL_RE = /(?:https?:\/\/)?(?:www\.|mobile\.)?(?:twitter\.com|x\.com)\b/i;
@@ -1351,19 +1370,22 @@ function applyArtistProfileUpdate(
     params.bio === undefined &&
     params.website === undefined &&
     !touchesTags(params) &&
-    effectiveSocial === undefined
+    effectiveSocial === undefined &&
+    params.country === undefined
   ) {
     throw new Error(
-      "At least one profile field (bio, website, tags, add_tags, remove_tags, social_links) must be provided."
+      "At least one profile field (bio, website, country, tags, add_tags, remove_tags, social_links) must be provided."
     );
   }
 
   assertNoTwitterOrXLinks(params.bio, params.website, effectiveSocial);
   assertTagParams(params);
+  const newCountry = params.country ? normalizeCountryCode(params.country) : params.country;
 
   const fieldsUpdated: Record<string, unknown> = {};
   if (params.website !== undefined) fieldsUpdated.website = params.website;
   if (params.bio !== undefined) fieldsUpdated.bio = params.bio;
+  if (newCountry !== undefined) fieldsUpdated.country = newCountry;
   if (params.tags !== undefined) fieldsUpdated.tags = params.tags;
   if (params.add_tags !== undefined) fieldsUpdated.add_tags = params.add_tags;
   if (params.remove_tags !== undefined) fieldsUpdated.remove_tags = params.remove_tags;
@@ -1385,9 +1407,28 @@ function applyArtistProfileUpdate(
     db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
   }
 
+  // The country column belongs to Luminous's own migration 84; adding it here
+  // could collide with that migration, so a missing column is an error, not a repair.
+  const hasCountryColumn = hasColumn(db, "artist_profiles", "country");
+  if (newCountry !== undefined && !hasCountryColumn) {
+    throw new Error(
+      "This Luminous database has no artist_profiles.country column yet. Update and start Luminous Music Player once so it migrates the database, then retry."
+    );
+  }
+
   const existing = db
-    .query<{ artist_key: string; website: string | null; tags: string; social_links: string; bio: string | null }, [string]>(
-      "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
+    .query<
+      {
+        artist_key: string;
+        website: string | null;
+        tags: string;
+        social_links: string;
+        bio: string | null;
+        country: string | null;
+      },
+      [string]
+    >(
+      `SELECT artist_key, website, tags, social_links, bio, ${countrySelectExpr(db)} FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE`
     )
     .get(artistName);
 
@@ -1409,20 +1450,24 @@ function applyArtistProfileUpdate(
   const keyToUse = existing?.artist_key ?? libraryName ?? artistName;
   const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
   const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
+  const countryToStore = newCountry !== undefined ? newCountry : (existing?.country ?? null);
   const newTags = applyTagParams(existing?.tags ?? null, params);
   const newSocial = effectiveSocial !== undefined
     ? JSON.stringify(effectiveSocial)
     : (existing?.social_links ?? "[]");
 
+  const columns = ["artist_key", "website", "tags", "social_links", "bio"];
+  const values: Array<string | null> = [keyToUse, newWebsite, newTags, newSocial, newBio];
+  if (hasCountryColumn) {
+    columns.push("country");
+    values.push(countryToStore);
+  }
   db.run(
-    `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
-     VALUES (?1, ?2, ?3, ?4, ?5)
+    `INSERT INTO artist_profiles (${columns.join(", ")})
+     VALUES (${columns.map((_, i) => `?${i + 1}`).join(", ")})
      ON CONFLICT(artist_key) DO UPDATE SET
-       website = excluded.website,
-       tags = excluded.tags,
-       social_links = excluded.social_links,
-       bio = excluded.bio`,
-    [keyToUse, newWebsite, newTags, newSocial, newBio]
+       ${columns.slice(1).map((c) => `${c} = excluded.${c}`).join(", ")}`,
+    values
   );
 
   const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
@@ -1443,6 +1488,7 @@ function applyArtistProfileUpdate(
     !existing ||
     newWebsite !== existing.website ||
     newBio !== existing.bio ||
+    countryToStore !== existing.country ||
     newTags !== existing.tags ||
     newSocial !== existing.social_links;
   return { result, changed };
@@ -1931,6 +1977,8 @@ export interface FindArtistsByTagOptions {
 export interface ArtistTagMatch {
   artist: string;
   tags: string[];
+  country?: string;
+  country_name?: string;
 }
 
 export interface FindArtistsByTagResult {
@@ -1973,10 +2021,13 @@ export function findArtistsByTag(
   interface RawRow {
     artist_key: string;
     tags: string;
+    country: string | null;
   }
 
   const rows = db
-    .query<RawRow, []>("SELECT artist_key, tags FROM artist_profiles ORDER BY artist_key ASC")
+    .query<RawRow, []>(
+      `SELECT artist_key, tags, ${countrySelectExpr(db)} FROM artist_profiles ORDER BY artist_key ASC`
+    )
     .all();
 
   const matches: ArtistTagMatch[] = [];
@@ -1988,7 +2039,12 @@ export function findArtistsByTag(
       parsedTags = [];
     }
     if (parsedTags.some((t) => t.trim().toLowerCase() === tagLower)) {
-      matches.push({ artist: row.artist_key, tags: parsedTags });
+      matches.push({
+        artist: row.artist_key,
+        tags: parsedTags,
+        country: row.country || undefined,
+        country_name: countryDisplayName(row.country),
+      });
     }
   }
 
