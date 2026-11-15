@@ -809,6 +809,40 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
 
       expect(result.success).toBe(true);
       expect(result.profile.tags).toEqual(["Canadian", "Grammy Award"]);
+      expect(result.warnings).toBeUndefined();
+
+      db.close();
+    });
+
+    it("warns without blocking when a tag matches a parent tag group with children", () => {
+      const db = setupCurationTestDb(tempDbPath);
+      db.run(`
+        CREATE TABLE artist_tag_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          color_index INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_custom INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE artist_tag_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tag_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          group_id INTEGER NOT NULL REFERENCES artist_tag_groups(id) ON DELETE CASCADE,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+      db.run(`INSERT INTO artist_tag_groups (id, name, is_custom) VALUES (1, 'Award-Winning', 1), (2, 'Empty-Group', 1)`);
+      db.run(`INSERT INTO artist_tag_assignments (tag_name, group_id) VALUES ('Grammy Award', 1), ('Juno Award', 1)`);
+
+      const result = updateArtistProfile(db, {
+        artist: "Shania Twain",
+        tags: ["award-winning", "Award-Winning", "Grammy Award", "Empty-Group"],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.profile.tags).toEqual(["award-winning", "Award-Winning", "Grammy Award", "Empty-Group"]);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0]).toContain('parent tag group "Award-Winning" (2 child tags)');
 
       db.close();
     });
