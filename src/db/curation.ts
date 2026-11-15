@@ -122,18 +122,25 @@ export interface BioSourceLink {
   url: string;
 }
 
+/**
+ * What we know about an artist's curated profile. A plain string (not a
+ * boolean) so it survives null/empty stripping in tool responses.
+ */
+export type ProfileStatus = "curated" | "no_profile" | "not_found";
+
+export const PROFILE_STATUS_DESCRIPTIONS: Record<ProfileStatus, string> = {
+  curated: "a stored profile exists",
+  no_profile: "the artist is known (in the library or from enrichment data) but has no profile yet",
+  not_found: "the artist is unknown",
+};
+
 export interface ArtistProfile {
   /** Library spelling when the artist is in the library, else the stored key. */
   artist: string;
   /** Stored profile key, only present when it differs from `artist`. */
   stored_artist_key?: string;
-  /**
-   * `curated`: a stored profile row exists. `library_only`: the artist is known
-   * (library or enrichment data) but has no profile row yet. (An entirely unknown
-   * artist is `null` from getArtistProfile; the tool layer reports `not_found`.)
-   * A string, so it survives null/empty stripping in tool responses.
-   */
-  status: "curated" | "library_only";
+  /** Never `not_found`: getArtistProfile returns null for an unknown artist. */
+  status: Exclude<ProfileStatus, "not_found">;
   bio: string | null;
   website: string | null;
   tags: string[];
@@ -830,33 +837,58 @@ export function updateTrackMetadata(
   };
 }
 
+interface LibraryArtistName {
+  name: string;
+  /** Number of songs crediting this exact spelling (artist or album_artist). */
+  count: number;
+  /** A MusicBrainz artist ID attached to one of those songs, if any. */
+  mbid: string | null;
+}
+
 /**
- * Returns the library's spelling of an artist (the most common `songs.artist` /
- * `songs.album_artist` value that matches `name` case-insensitively), or null
- * when the library has no such artist. Ties break on the binary-smallest value
- * so the result is deterministic.
+ * Every distinct artist spelling in the library with its song count. This is
+ * the only place that knows how artists are stored in `songs` (the `artist` and
+ * `album_artist` columns, and `album_artist` possibly missing on old schemas).
+ */
+function libraryArtistNames(db: Database): LibraryArtistName[] {
+  if (!hasTable(db, "songs")) return [];
+  const mbid = hasColumn(db, "songs", "musicbrainz_artist_id") ? "musicbrainz_artist_id" : "NULL";
+  const albumArtist = hasColumn(db, "songs", "album_artist")
+    ? `UNION ALL SELECT album_artist, ${mbid} FROM songs WHERE album_artist <> ''`
+    : "";
+  return db
+    .query<LibraryArtistName, []>(
+      `SELECT n AS name, COUNT(*) AS count, MAX(m) AS mbid FROM (
+         SELECT artist AS n, ${mbid} AS m FROM songs WHERE artist <> ''
+         ${albumArtist}
+       )
+       GROUP BY n COLLATE BINARY`
+    )
+    .all();
+}
+
+/**
+ * The library's spelling of an artist (the most common spelling that matches
+ * `name` case-insensitively; ties break on the binary-smallest spelling so the
+ * result is deterministic), or null when the library has no such artist.
  *
  * Luminous keys `artist_profiles` case-insensitively and stores the library's
  * spelling, so this is the spelling callers should see and new keys should use.
  */
-function resolveLibraryArtistName(db: Database, name: string): string | null {
-  if (!hasTable(db, "songs")) return null;
-  const hasAlbumArtist = hasColumn(db, "songs", "album_artist");
-  const albumArtistUnion = hasAlbumArtist
-    ? "UNION ALL SELECT album_artist FROM songs WHERE album_artist = ?1 COLLATE NOCASE"
-    : "";
-  const row = db
-    .query<{ name: string }, [string]>(
-      `SELECT v AS name FROM (
-         SELECT artist AS v FROM songs WHERE artist = ?1 COLLATE NOCASE
-         ${albumArtistUnion}
-       )
-       GROUP BY v COLLATE BINARY
-       ORDER BY COUNT(*) DESC, v COLLATE BINARY ASC
-       LIMIT 1`
-    )
-    .get(name);
-  return row?.name ?? null;
+function findLibraryArtist(db: Database, name: string): LibraryArtistName | null {
+  const q = name.toLowerCase();
+  let best: LibraryArtistName | null = null;
+  for (const candidate of libraryArtistNames(db)) {
+    if (candidate.name.toLowerCase() !== q) continue;
+    if (
+      !best ||
+      candidate.count > best.count ||
+      (candidate.count === best.count && candidate.name < best.name)
+    ) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 function levenshtein(a: string, b: string): number {
@@ -875,39 +907,34 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
+/** Shortest string for which "one name contains the other" counts as similar. */
+const MIN_CONTAINS_LENGTH = 3;
+
 /**
- * Up to `limit` library artist names closest to `name`, best first. A name is a
- * candidate if it contains or is contained by the query, or is within a small
- * edit distance (case-insensitive), so typos and partial names both match.
+ * Up to `limit` library artist names closest to `name`, best first (case-
+ * insensitive). Candidates rank by tier: exact match, then containment (either
+ * direction, only when the contained string has at least MIN_CONTAINS_LENGTH
+ * characters so short names don't match most of the library), then small edit
+ * distance for typos. Within a tier, smaller edit distance wins, then name.
  */
 function suggestLibraryArtists(db: Database, name: string, limit = 5): string[] {
-  if (!hasTable(db, "songs")) return [];
-  const albumArtist = hasColumn(db, "songs", "album_artist")
-    ? "UNION SELECT album_artist FROM songs WHERE album_artist IS NOT NULL AND album_artist <> ''"
-    : "";
-  const names = db
-    .query<{ v: string }, []>(
-      `SELECT artist AS v FROM songs WHERE artist <> '' ${albumArtist}`
-    )
-    .all()
-    .map((r) => r.v);
-
   const q = name.toLowerCase();
   const maxDistance = Math.max(2, Math.floor(q.length * 0.4));
+  const ranked: Array<{ name: string; tier: number; distance: number }> = [];
   const seen = new Set<string>();
-  const scored: Array<{ name: string; score: number }> = [];
-  for (const candidate of names) {
+  for (const { name: candidate } of libraryArtistNames(db)) {
     const c = candidate.toLowerCase();
     if (seen.has(c)) continue;
     seen.add(c);
-    const contains = c.includes(q) || q.includes(c);
     const distance = levenshtein(q, c);
-    if (contains || distance <= maxDistance) {
-      scored.push({ name: candidate, score: contains ? Math.min(distance, 1) - 1 : distance });
-    }
+    const contains =
+      (c.includes(q) && q.length >= MIN_CONTAINS_LENGTH) ||
+      (q.includes(c) && c.length >= MIN_CONTAINS_LENGTH);
+    const tier = c === q ? 0 : contains ? 1 : distance <= maxDistance ? 2 : -1;
+    if (tier >= 0) ranked.push({ name: candidate, tier, distance });
   }
-  scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
-  return scored.slice(0, limit).map((s) => s.name);
+  ranked.sort((a, b) => a.tier - b.tier || a.distance - b.distance || a.name.localeCompare(b.name));
+  return ranked.slice(0, limit).map((r) => r.name);
 }
 
 /**
@@ -935,16 +962,10 @@ export function getArtistProfile(
   let songArtistFound = false;
   if (hasTable(db, "songs")) {
     if (artistName && !mbid) {
-      const songRow = db
-        .query<{ musicbrainz_artist_id: string | null }, [string, string]>(
-          "SELECT musicbrainz_artist_id FROM songs WHERE (artist = ?1 COLLATE NOCASE OR album_artist = ?2 COLLATE NOCASE) LIMIT 1"
-        )
-        .get(artistName, artistName);
-      if (songRow) {
+      const libraryArtist = findLibraryArtist(db, artistName);
+      if (libraryArtist) {
         songArtistFound = true;
-        if (songRow.musicbrainz_artist_id) {
-          mbid = songRow.musicbrainz_artist_id;
-        }
+        mbid = libraryArtist.mbid ?? mbid;
       }
     } else if (mbid && !artistName) {
       const songRow = db
@@ -960,7 +981,7 @@ export function getArtistProfile(
   }
 
   const libraryName =
-    songArtistFound && resolvedArtistName ? resolveLibraryArtistName(db, resolvedArtistName) : null;
+    songArtistFound && resolvedArtistName ? (findLibraryArtist(db, resolvedArtistName)?.name ?? null) : null;
 
   // Check artist_profiles table
   interface RawProfile {
@@ -1032,7 +1053,7 @@ export function getArtistProfile(
   return {
     artist: displayName,
     stored_artist_key: storedKey,
-    status: rawProfile ? "curated" : "library_only",
+    status: rawProfile ? "curated" : "no_profile",
     bio: rawProfile?.bio ?? null,
     website: rawProfile?.website ?? null,
     tags: parsedTags,
@@ -1229,7 +1250,7 @@ export function updateArtistProfile(
     // case-insensitively and rewrites a stale spelling on its own next save, so
     // renaming here would only race the app. New rows use the library's
     // spelling, falling back to the caller's input for artists not in the library.
-    const libraryName = existing ? null : resolveLibraryArtistName(db, artistName);
+    const libraryName = existing ? null : (findLibraryArtist(db, artistName)?.name ?? null);
     if (!existing && !libraryName && !params.allow_unknown_artist) {
       const suggestions = suggestLibraryArtists(db, artistName);
       throw new Error(

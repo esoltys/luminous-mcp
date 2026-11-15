@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
+  PROFILE_STATUS_DESCRIPTIONS,
+  type ProfileStatus,
   auditMetadata,
   findArtistsByTag,
   getAlbumProfile,
@@ -24,6 +26,8 @@ import {
 } from "../db/curation.ts";
 import { formatMcpResponse } from "../utils/response.ts";
 import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
+
+const PROFILE_STATUS_ENTRIES = Object.entries(PROFILE_STATUS_DESCRIPTIONS);
 
 /**
  * Registers metadata hygiene and curation assistant tools on the MCP server instance.
@@ -264,7 +268,9 @@ export function registerCurationTools(
     {
       title: "Get Artist Profile",
       description:
-        "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID). Always check `status`: 'curated' (a profile exists), 'library_only' (artist is in the library but has no profile yet) or 'not_found' (unknown artist).",
+        "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID). Always check `status`: " +
+        PROFILE_STATUS_ENTRIES.map(([status, meaning]) => `'${status}' (${meaning})`).join(", ") +
+        ". Unlike most lookups, an unknown artist is a normal result with status 'not_found', not an error.",
       inputSchema: {
         artist: z.string().optional().describe("Artist name to inspect"),
         artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
@@ -305,11 +311,12 @@ export function registerCurationTools(
 
         if (!profile) {
           // A normal result (not an error): "unknown artist" is a valid answer
-          // distinct from "known artist, no profile yet" (status library_only).
-          return formatMcpResponse({
+          // distinct from "known artist, no profile yet" (status no_profile).
+          const notFound: { artist?: string; status: ProfileStatus } = {
             artist: params.artist ?? params.artist_id,
             status: "not_found",
-          });
+          };
+          return formatMcpResponse(notFound);
         }
 
         return formatMcpResponse(profile);

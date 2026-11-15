@@ -679,10 +679,10 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       return db;
     }
 
-    it("reports curated, library_only and not_found as distinct read outcomes", () => {
+    it("reports curated, no_profile and not_found as distinct read outcomes", () => {
       const db = seed();
       expect(getArtistProfile(db, { artist: "Clean Artist" })?.status).toBe("curated");
-      expect(getArtistProfile(db, { artist: "Lola Young" })?.status).toBe("library_only");
+      expect(getArtistProfile(db, { artist: "Lola Young" })?.status).toBe("no_profile");
       expect(getArtistProfile(db, { artist: "Nobody Here" })).toBeNull();
       db.close();
     });
@@ -696,7 +696,7 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       await client.connect(cT);
 
       const libOnly = await client.callTool({ name: "get_artist_profile", arguments: { artist: "Lola Young" } });
-      expect(JSON.parse(getTextContent(libOnly).text).status).toBe("library_only");
+      expect(JSON.parse(getTextContent(libOnly).text).status).toBe("no_profile");
       const missing = await client.callTool({ name: "get_artist_profile", arguments: { artist: "Nobody Here" } });
       expect((missing as any).isError).toBeFalsy();
       expect(JSON.parse(getTextContent(missing).text)).toEqual({ artist: "Nobody Here", status: "not_found" });
@@ -726,6 +726,28 @@ describe("Metadata Hygiene & Curation Database Layer", () => {
       expect(() => updateArtistProfile(db, { artist: "Zzzzzzzzzz", bio: "x" })).toThrow(
         /No similar library artists/
       );
+      db.close();
+    });
+
+    it("suggests by containment only for queries of 3+ characters", () => {
+      const db = seed();
+      db.run(`INSERT INTO songs (title, artist, album_artist, album, path)
+        VALUES ('C', 'Lo', 'Lo', 'X', '/m/lo.mp3'), ('D', 'Loud Band', 'Loud Band', 'Y', '/m/lb.mp3');`);
+      // 3+ chars: "lola" is contained in "lola young".
+      expect(() => updateArtistProfile(db, { artist: "Lola", bio: "x" })).toThrow(/"Lola Young"/);
+      // 2 chars: "lo" would be contained in most names; only the edit-distance tier applies.
+      try {
+        updateArtistProfile(db, { artist: "Lo!", bio: "x" });
+      } catch (e: any) {
+        expect(e.message).not.toContain("Loud Band");
+        expect(e.message).not.toContain("Lola Young");
+      }
+      try {
+        updateArtistProfile(db, { artist: "Xy", bio: "x" });
+      } catch (e: any) {
+        expect(e.message).not.toContain("Loud Band");
+        expect(e.message).not.toContain("Lola Young");
+      }
       db.close();
     });
 
