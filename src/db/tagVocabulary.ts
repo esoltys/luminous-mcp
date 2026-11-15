@@ -200,7 +200,13 @@ export function loadTagVocabulary(env: NodeJS.ProcessEnv = process.env): TagVoca
 
 let activeVocabulary: TagVocabulary | null = null;
 
-/** The vocabulary in force; defaults until the server installs one at startup. */
+/**
+ * The vocabulary in force; defaults until the server installs one at startup.
+ * Process-wide on purpose: validation, tool descriptions and reports must all
+ * read the same one. `createMcpServer` installs it before registering tools
+ * (descriptions are generated then), so install a new one only by creating a
+ * new server, or the descriptions will describe the old rules.
+ */
 export function getTagVocabulary(): TagVocabulary {
   activeVocabulary ??= defaultTagVocabulary();
   return activeVocabulary;
@@ -253,10 +259,17 @@ function categoryLabel(vocab: TagVocabulary, id: string | undefined): string {
   return vocab.categories.find((c) => c.id === id)?.label ?? id ?? "unknown";
 }
 
+/** "label (e.g. 'A', 'B')": the one wording every message and description uses for a category. */
+function describeCategory(cat: TagCategorySpec): string {
+  return cat.examples.length > 0
+    ? `${cat.label} (e.g. ${cat.examples.map((e) => `'${e}'`).join(", ")})`
+    : cat.label;
+}
+
 function allowedSummary(vocab: TagVocabulary): string {
   return vocab.categories
     .filter((c) => c.kind === "allowed")
-    .map((c) => (c.examples.length > 0 ? `${c.label} (e.g. ${c.examples.map((e) => `'${e}'`).join(", ")})` : c.label))
+    .map(describeCategory)
     .join(" and ");
 }
 
@@ -268,7 +281,7 @@ export function describeTagPolicy(vocab: TagVocabulary): string {
   const allowed = allowedSummary(vocab);
   const denied = vocab.categories
     .filter((c) => c.kind === "denied")
-    .map((c) => (c.examples.length > 0 ? `${c.label} tags (e.g. ${c.examples.map((e) => `'${e}'`).join(", ")})` : `${c.label} tags`))
+    .map((c) => `${describeCategory(c)} tags`)
     .join(" or ");
   const unknown =
     vocab.unknown_tags === "reject"
