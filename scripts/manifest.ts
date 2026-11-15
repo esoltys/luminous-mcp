@@ -65,7 +65,10 @@ export async function buildManifest(opts: ManifestOptions) {
       mcp_config: {
         command: `\${__dirname}/${opts.binaryName}`,
         args: [],
-        env: { LUMINOUS_DB_PATH: "${user_config.db_path}" },
+        env: {
+          LUMINOUS_DB_PATH: "${user_config.db_path}",
+          LUMINOUS_ARTIST_TAG_VOCAB: "${user_config.tag_vocab_path}",
+        },
       },
     },
     user_config: {
@@ -74,6 +77,13 @@ export async function buildManifest(opts: ManifestOptions) {
         title: "Luminous database",
         description:
           "Path to luminous.db. Leave empty to auto-detect; set it for portable Luminous installs (<luminous folder>/data/luminous.db) or custom locations.",
+        required: false,
+      },
+      tag_vocab_path: {
+        type: "file",
+        title: "Artist tag vocabulary (optional)",
+        description:
+          "JSON file that replaces the built-in rules for which artist tags may be written (see get_tag_policy). Leave empty for the defaults: nationality and named awards allowed, genre and decade tags rejected.",
         required: false,
       },
     },

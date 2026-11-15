@@ -3,6 +3,7 @@ import { LuminousBridgeClient } from "./bridge/client.ts";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.ts";
 import { LuminousDatabase } from "./db/connection.ts";
 import { resolveDbPath } from "./db/paths.ts";
+import { loadTagVocabulary, setTagVocabulary, type TagVocabulary } from "./db/tagVocabulary.ts";
 import { registerAnalyticsTools } from "./tools/analytics.ts";
 import { registerCurationTools } from "./tools/curation.ts";
 import { registerLibraryTools } from "./tools/library.ts";
@@ -16,6 +17,8 @@ export interface ServerOptions {
   bridgeUrl?: string;
   bridgePort?: number;
   bridgeClient?: LuminousBridgeClient;
+  /** Artist tag vocabulary; defaults to LUMINOUS_ARTIST_TAG_VOCAB or the built-in one. */
+  tagVocabulary?: TagVocabulary;
 }
 
 export interface ServerContext {
@@ -28,6 +31,10 @@ export interface ServerContext {
  * Creates and initializes the Luminous MCP server, database context, and desktop bridge.
  */
 export function createMcpServer(options: ServerOptions = {}): ServerContext {
+  // Load before registering tools: their descriptions are generated from it,
+  // and a bad LUMINOUS_ARTIST_TAG_VOCAB file must fail startup.
+  setTagVocabulary(options.tagVocabulary ?? loadTagVocabulary());
+
   const dbPath = resolveDbPath({ customPath: options.dbPath });
   const db = new LuminousDatabase(dbPath, { readonly: options.readonly });
   const bridge =

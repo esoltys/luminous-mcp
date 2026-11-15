@@ -111,6 +111,24 @@ bun run start
 
 In portable mode (a `portable` or `luminous.portable` file, or a `data/` folder, next to the Luminous executable) the library lives in `<luminous folder>/data/luminous.db`, which the server cannot discover automatically. Point it there with `LUMINOUS_DATA_DIR=<luminous folder>/data` (or `LUMINOUS_DB_PATH`).
 
+#### Artist tag vocabulary
+
+`update_artist_profile` / `update_artist_profiles` only accept curated attribute tags: by default nationality (`Canadian`) and named awards (`Grammy Award`) are allowed, genre and decade/era tags are rejected, and other tags are accepted with a warning. `get_tag_policy` returns the rules in force and `list_artist_tags` reports every tag in use (case variants grouped, each marked `allowed` / `unknown` / `denied`) without changing anything.
+
+To use your own rules, point `LUMINOUS_ARTIST_TAG_VOCAB` at a JSON file. It replaces the defaults entirely and a missing or invalid file stops the server at startup:
+
+```json
+{
+  "unknown_tags": "reject",
+  "categories": [
+    { "id": "label", "label": "record label", "kind": "allowed", "description": "Label", "values": ["Sub Pop"], "examples": ["Sub Pop"] },
+    { "id": "mood", "label": "mood", "kind": "denied", "description": "Moods are subjective", "values": ["Sad"] }
+  ]
+}
+```
+
+`values` match tags exactly and `patterns` are regular expressions matched against the whole tag, both case-insensitively. Denied categories win over allowed ones. Decade/era tags are still rejected on album profiles when the vocabulary has a category with id `decade_era`.
+
 ### One-Click Install (Claude Desktop via `.mcpb`)
 
 Install directly via the official [MCP Bundle (.mcpb)](https://github.com/modelcontextprotocol/mcpb) format (zero external dependencies; includes a self-contained binary):
