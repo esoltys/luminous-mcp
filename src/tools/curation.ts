@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { LuminousBridgeClient } from "../bridge/client.ts";
 import type { LuminousDatabase } from "../db/connection.ts";
 import {
+  PROFILE_STATUS_DESCRIPTIONS,
+  type ProfileStatus,
   auditMetadata,
   findArtistsByTag,
   getAlbumProfile,
@@ -24,6 +26,8 @@ import {
 } from "../db/curation.ts";
 import { formatMcpResponse } from "../utils/response.ts";
 import { READ_ONLY_EXTERNAL, READ_ONLY_LOCAL, WRITE_IDEMPOTENT } from "./annotations.ts";
+
+const PROFILE_STATUS_ENTRIES = Object.entries(PROFILE_STATUS_DESCRIPTIONS);
 
 /**
  * Registers metadata hygiene and curation assistant tools on the MCP server instance.
@@ -264,7 +268,9 @@ export function registerCurationTools(
     {
       title: "Get Artist Profile",
       description:
-        "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID).",
+        "Get an artist's curated profile (biography with cited sources, official website, tags, social links, Wikipedia extract, and MusicBrainz ID). Always check `status`: " +
+        PROFILE_STATUS_ENTRIES.map(([status, meaning]) => `'${status}' (${meaning})`).join(", ") +
+        ". Unlike most lookups, an unknown artist is a normal result with status 'not_found', not an error.",
       inputSchema: {
         artist: z.string().optional().describe("Artist name to inspect"),
         artist_id: z.string().optional().describe("MusicBrainz artist UUID"),
@@ -304,15 +310,13 @@ export function registerCurationTools(
         });
 
         if (!profile) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: `Artist profile not found for: "${params.artist ?? params.artist_id}".`,
-              },
-            ],
+          // A normal result (not an error): "unknown artist" is a valid answer
+          // distinct from "known artist, no profile yet" (status no_profile).
+          const notFound: { artist?: string; status: ProfileStatus } = {
+            artist: params.artist ?? params.artist_id,
+            status: "not_found",
           };
+          return formatMcpResponse(notFound);
         }
 
         return formatMcpResponse(profile);
@@ -388,7 +392,7 @@ export function registerCurationTools(
         "Update or create an artist's curated profile (biography, official website URL, tags, social media / external source links) in the Luminous database. " +
         "Biography rules: no track lists (describe the artist, don't enumerate songs/albums); no Twitter/X links anywhere; keep it to roughly 150-300 words; " +
         "end with a distinct trailing 'Sources:' section listing every source as one Markdown link per line (e.g. '- [Wikipedia](https://...)'), never a single inline citation. " +
-        "tags/links rules below.",
+        "tags/links rules below. Names matching no library artist (and with no existing profile) are rejected with nearest-match suggestions unless allow_unknown_artist is true; the result's `created` says whether a new profile was made.",
       inputSchema: {
       artist: z.string().min(1).describe("Artist name whose profile is being updated"),
       bio: z
@@ -434,6 +438,12 @@ export function registerCurationTools(
         .describe(
           "External links (alias for social_links) - official artist/label-controlled links only. No Twitter/X, fan sites, unofficial wikis, or forums."
         ),
+      allow_unknown_artist: z
+        .boolean()
+        .optional()
+        .describe(
+          "Create a profile even if the name matches no library artist (default false). Unknown names are otherwise rejected with nearest-match suggestions; existing profiles are always editable."
+        ),
       },
       annotations: WRITE_IDEMPOTENT,
     },
@@ -459,6 +469,7 @@ export function registerCurationTools(
           tags: params.tags,
           social_links: params.social_links as any,
           links: params.links as any,
+          allow_unknown_artist: params.allow_unknown_artist,
         };
 
         const result = updateArtistProfile(handle, updateParams);
