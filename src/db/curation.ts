@@ -155,16 +155,20 @@ export interface ArtistProfile {
   musicbrainz_artist_id: string | null;
 }
 
-export interface UpdateArtistProfileParams {
-  artist: string;
-  bio?: string | null;
-  website?: string | null;
+/** Tag edit intent shared by artist and album profile updates. */
+interface TagParams {
   /** Replaces the whole tag list. Mutually exclusive with add_tags/remove_tags. */
   tags?: string[];
   /** Tags to add (case-insensitive, order-preserving dedupe). Applied after remove_tags. */
   add_tags?: string[];
   /** Tags to remove (case-insensitive); absent tags are ignored. */
   remove_tags?: string[];
+}
+
+export interface UpdateArtistProfileParams extends TagParams {
+  artist: string;
+  bio?: string | null;
+  website?: string | null;
   social_links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   links?: Array<{ platform?: string; handle_or_url?: string } | string>;
   /** Permit creating a profile for a name that matches no library artist. */
@@ -229,17 +233,11 @@ export interface AlbumProfile {
   } | null;
 }
 
-export interface UpdateAlbumProfileParams {
+export interface UpdateAlbumProfileParams extends TagParams {
   album: string;
   artist?: string | null;
   description?: string | null;
   website?: string | null;
-  /** Replaces the whole tag list. Mutually exclusive with add_tags/remove_tags. */
-  tags?: string[];
-  /** Tags to add (case-insensitive, order-preserving dedupe). Applied after remove_tags. */
-  add_tags?: string[];
-  /** Tags to remove (case-insensitive); absent tags are ignored. */
-  remove_tags?: string[];
   links?: Array<AlbumLinkItem | string>;
 }
 
@@ -1217,12 +1215,6 @@ function findParentTagGroupWarnings(db: Database, tags: string[] | undefined): s
   return warnings;
 }
 
-interface TagParams {
-  tags?: string[];
-  add_tags?: string[];
-  remove_tags?: string[];
-}
-
 function touchesTags(p: TagParams): boolean {
   return p.tags !== undefined || p.add_tags !== undefined || p.remove_tags !== undefined;
 }
@@ -1377,85 +1369,83 @@ function applyArtistProfileUpdate(
   if (params.remove_tags !== undefined) fieldsUpdated.remove_tags = params.remove_tags;
   if (effectiveSocial !== undefined) fieldsUpdated.social_links = effectiveSocial;
 
-  {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS artist_profiles (
-        artist_key TEXT PRIMARY KEY COLLATE NOCASE,
-        website TEXT,
-        tags TEXT NOT NULL DEFAULT '[]',
-        social_links TEXT NOT NULL DEFAULT '[]',
-        bio TEXT
-      );
-    `);
-    if (!hasColumn(db, "artist_profiles", "tags")) {
-      db.run(`ALTER TABLE artist_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
-    }
-    if (!hasColumn(db, "artist_profiles", "social_links")) {
-      db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
-    }
-
-    const existing = db
-      .query<{ artist_key: string; website: string | null; tags: string; social_links: string; bio: string | null }, [string]>(
-        "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
-      )
-      .get(artistName);
-
-    // An existing row keeps its stored key: Luminous keys profiles
-    // case-insensitively and rewrites a stale spelling on its own next save, so
-    // renaming here would only race the app. New rows use the library's
-    // spelling, falling back to the caller's input for artists not in the library.
-    const libraryName = existing ? null : (findLibraryArtist(db, artistName)?.name ?? null);
-    if (!existing && !libraryName && !params.allow_unknown_artist) {
-      const suggestions = suggestLibraryArtists(db, artistName);
-      throw new Error(
-        `"${artistName}" matches no artist in the library and has no existing profile.` +
-          (suggestions.length > 0
-            ? ` Did you mean: ${suggestions.map((n) => `"${n}"`).join(", ")}?`
-            : " No similar library artists were found.") +
-          ` Pass allow_unknown_artist: true to create a profile for it anyway.`
-      );
-    }
-    const keyToUse = existing?.artist_key ?? libraryName ?? artistName;
-    const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
-    const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
-    const newTags = applyTagParams(existing?.tags ?? null, params);
-    const newSocial = effectiveSocial !== undefined
-      ? JSON.stringify(effectiveSocial)
-      : (existing?.social_links ?? "[]");
-
-    db.run(
-      `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
-       VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT(artist_key) DO UPDATE SET
-         website = excluded.website,
-         tags = excluded.tags,
-         social_links = excluded.social_links,
-         bio = excluded.bio`,
-      [keyToUse, newWebsite, newTags, newSocial, newBio]
+  db.run(`
+    CREATE TABLE IF NOT EXISTS artist_profiles (
+      artist_key TEXT PRIMARY KEY COLLATE NOCASE,
+      website TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      social_links TEXT NOT NULL DEFAULT '[]',
+      bio TEXT
     );
-
-    const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
-    const warnings = findParentTagGroupWarnings(db, params.tags ?? params.add_tags);
-
-    const result: UpdateArtistProfileResult = {
-      success: true,
-      artist: updatedProfile.artist,
-      created: !existing,
-      updated_fields: fieldsUpdated,
-      profile: updatedProfile,
-    };
-    if (warnings.length > 0) {
-      result.warnings = warnings;
-    }
-
-    const changed =
-      !existing ||
-      newWebsite !== existing.website ||
-      newBio !== existing.bio ||
-      newTags !== existing.tags ||
-      newSocial !== existing.social_links;
-    return { result, changed };
+  `);
+  if (!hasColumn(db, "artist_profiles", "tags")) {
+    db.run(`ALTER TABLE artist_profiles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
   }
+  if (!hasColumn(db, "artist_profiles", "social_links")) {
+    db.run(`ALTER TABLE artist_profiles ADD COLUMN social_links TEXT NOT NULL DEFAULT '[]';`);
+  }
+
+  const existing = db
+    .query<{ artist_key: string; website: string | null; tags: string; social_links: string; bio: string | null }, [string]>(
+      "SELECT artist_key, website, tags, social_links, bio FROM artist_profiles WHERE artist_key = ?1 COLLATE NOCASE"
+    )
+    .get(artistName);
+
+  // An existing row keeps its stored key: Luminous keys profiles
+  // case-insensitively and rewrites a stale spelling on its own next save, so
+  // renaming here would only race the app. New rows use the library's
+  // spelling, falling back to the caller's input for artists not in the library.
+  const libraryName = existing ? null : (findLibraryArtist(db, artistName)?.name ?? null);
+  if (!existing && !libraryName && !params.allow_unknown_artist) {
+    const suggestions = suggestLibraryArtists(db, artistName);
+    throw new Error(
+      `"${artistName}" matches no artist in the library and has no existing profile.` +
+        (suggestions.length > 0
+          ? ` Did you mean: ${suggestions.map((n) => `"${n}"`).join(", ")}?`
+          : " No similar library artists were found.") +
+        ` Pass allow_unknown_artist: true to create a profile for it anyway.`
+    );
+  }
+  const keyToUse = existing?.artist_key ?? libraryName ?? artistName;
+  const newWebsite = params.website !== undefined ? params.website : (existing?.website ?? null);
+  const newBio = params.bio !== undefined ? params.bio : (existing?.bio ?? null);
+  const newTags = applyTagParams(existing?.tags ?? null, params);
+  const newSocial = effectiveSocial !== undefined
+    ? JSON.stringify(effectiveSocial)
+    : (existing?.social_links ?? "[]");
+
+  db.run(
+    `INSERT INTO artist_profiles (artist_key, website, tags, social_links, bio)
+     VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT(artist_key) DO UPDATE SET
+       website = excluded.website,
+       tags = excluded.tags,
+       social_links = excluded.social_links,
+       bio = excluded.bio`,
+    [keyToUse, newWebsite, newTags, newSocial, newBio]
+  );
+
+  const updatedProfile = getArtistProfile(db, { artist: keyToUse })!;
+  const warnings = findParentTagGroupWarnings(db, params.tags ?? params.add_tags);
+
+  const result: UpdateArtistProfileResult = {
+    success: true,
+    artist: updatedProfile.artist,
+    created: !existing,
+    updated_fields: fieldsUpdated,
+    profile: updatedProfile,
+  };
+  if (warnings.length > 0) {
+    result.warnings = warnings;
+  }
+
+  const changed =
+    !existing ||
+    newWebsite !== existing.website ||
+    newBio !== existing.bio ||
+    newTags !== existing.tags ||
+    newSocial !== existing.social_links;
+  return { result, changed };
 }
 
 interface RawAlbumProfile {
